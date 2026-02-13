@@ -1,117 +1,132 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
-
-import React from 'react';
-import type {PropsWithChildren} from 'react';
+import React, {useState} from 'react';
 import {
   SafeAreaView,
-  ScrollView,
-  StatusBar,
   StyleSheet,
   Text,
-  useColorScheme,
+  TouchableOpacity,
+  Alert,
   View,
 } from 'react-native';
-
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
-
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
-
-function Section({children, title}: SectionProps): JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
-}
+import {PermissionsAndroid, Platform} from 'react-native';
+import {SeedVault, SeedVaultPermissionAndroid} from '@solana-mobile/seed-vault-lib';
 
 function App(): JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+  const [connected, setConnected] = useState(false);
+  const [accountInfo, setAccountInfo] = useState<string>('');
 
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
+  const checkAndRequestPermission = async (): Promise<boolean> => {
+    if (Platform.OS !== 'android') {
+      Alert.alert('Error', 'Seed Vault is only available on Android');
+      return false;
+    }
+
+    const isAvailable = await SeedVault.isSeedVaultAvailable(false);
+    if (!isAvailable) {
+      Alert.alert(
+        'Error',
+        'Seed Vault is not available on this device. Only Solana Seeker supports Seed Vault.',
+      );
+      return false;
+    }
+
+    const granted = await PermissionsAndroid.request(
+      SeedVaultPermissionAndroid,
+      {
+        title: 'Seed Vault Permission',
+        message: 'This app needs permission to access your wallet',
+        buttonNeutral: 'Ask Me Later',
+        buttonNegative: 'Cancel',
+        buttonPositive: 'OK',
+      },
+    );
+
+    return granted === PermissionsAndroid.RESULTS.GRANTED;
+  };
+
+  const connectSeedVault = async () => {
+    try {
+      const hasPermission = await checkAndRequestPermission();
+      if (!hasPermission) {
+        return;
+      }
+
+      const result = await SeedVault.authorizeNewSeed();
+
+      if (result) {
+        const authToken = result.authToken;
+        const accounts = await SeedVault.getUserWallets(authToken);
+
+        if (accounts.length > 0) {
+          const account = accounts[0];
+          const info = `Connected!\n\nPublic Key: ${account.publicKeyEncoded}\nDerivation Path: ${account.derivationPath}`;
+          setAccountInfo(info);
+          setConnected(true);
+        } else {
+          Alert.alert('No Accounts', 'No accounts found in Seed Vault');
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      Alert.alert('Error', `Failed to connect: ${errorMessage}`);
+    }
   };
 
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.content}>
+        {!connected ? (
+          <TouchableOpacity style={styles.button} onPress={connectSeedVault}>
+            <Text style={styles.buttonText}>Connect Seed Vault</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.infoContainer}>
+            <Text style={styles.infoText}>{accountInfo}</Text>
+            <TouchableOpacity
+              style={styles.button}
+              onPress={() => {
+                setConnected(false);
+                setAccountInfo('');
+              }}>
+              <Text style={styles.buttonText}>Disconnect</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
   },
-  sectionTitle: {
-    fontSize: 24,
+  content: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  button: {
+    backgroundColor: '#9945FF',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 30,
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 18,
     fontWeight: '600',
   },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
+  infoContainer: {
+    alignItems: 'center',
   },
-  highlight: {
-    fontWeight: '700',
+  infoText: {
+    color: '#fff',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 24,
   },
 });
 
