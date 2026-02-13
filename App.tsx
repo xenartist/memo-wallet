@@ -10,9 +10,31 @@ import {
 import {PermissionsAndroid, Platform} from 'react-native';
 import {SeedVault, SeedVaultPermissionAndroid} from '@solana-mobile/seed-vault-lib';
 
+const RPC_URL = 'https://rpc.mainnet.x1.xyz';
+
+const rpcCall = async (method: string, params: any[] = []): Promise<any> => {
+  const response = await fetch(RPC_URL, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method,
+      params,
+    }),
+  });
+  const data = await response.json();
+  if (data.error) {
+    throw new Error(data.error.message);
+  }
+  return data.result;
+};
+
 function App(): JSX.Element {
   const [connected, setConnected] = useState(false);
   const [accountInfo, setAccountInfo] = useState<string>('');
+  const [balance, setBalance] = useState<string>('');
+  const [currentAuthToken, setCurrentAuthToken] = useState<number | null>(null);
 
   const checkAndRequestPermission = async (): Promise<boolean> => {
     if (Platform.OS !== 'android') {
@@ -43,6 +65,33 @@ function App(): JSX.Element {
     return granted === PermissionsAndroid.RESULTS.GRANTED;
   };
 
+  const fetchBalance = async (publicKey: string): Promise<void> => {
+    try {
+      const result = await rpcCall('getBalance', [publicKey]);
+      const balanceLamports = result.value;
+      const balanceXNT = balanceLamports / 1000000000;
+      setBalance(balanceXNT.toFixed(6));
+    } catch (error) {
+      console.error('Failed to fetch balance:', error);
+      setBalance('Failed to fetch');
+    }
+  };
+
+  const getAccountInfo = async (authToken: number) => {
+    const accounts = await SeedVault.getUserWallets(authToken);
+    if (accounts.length > 0) {
+      const account = accounts[0];
+      const info = `Public Key: ${account.publicKeyEncoded}\nDerivation Path: ${account.derivationPath}`;
+      setAccountInfo(info);
+      setConnected(true);
+      setCurrentAuthToken(authToken);
+      
+      await fetchBalance(account.publicKeyEncoded);
+    } else {
+      Alert.alert('No Accounts', 'No accounts found in Seed Vault');
+    }
+  };
+
   const connectSeedVault = async () => {
     try {
       const hasPermission = await checkAndRequestPermission();
@@ -50,25 +99,49 @@ function App(): JSX.Element {
         return;
       }
 
+      const authorizedSeeds = await SeedVault.getAuthorizedSeeds();
+      
+      if (authorizedSeeds.length > 0) {
+        await getAccountInfo(authorizedSeeds[0].authToken);
+        return;
+      }
+
       const result = await SeedVault.authorizeNewSeed();
 
       if (result) {
-        const authToken = result.authToken;
-        const accounts = await SeedVault.getUserWallets(authToken);
-
-        if (accounts.length > 0) {
-          const account = accounts[0];
-          const info = `Connected!\n\nPublic Key: ${account.publicKeyEncoded}\nDerivation Path: ${account.derivationPath}`;
-          setAccountInfo(info);
-          setConnected(true);
-        } else {
-          Alert.alert('No Accounts', 'No accounts found in Seed Vault');
-        }
+        await getAccountInfo(result.authToken);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       Alert.alert('Error', `Failed to connect: ${errorMessage}`);
     }
+  };
+
+  const disconnect = () => {
+    setConnected(false);
+    setAccountInfo('');
+    setBalance('');
+    setCurrentAuthToken(null);
+  };
+
+  const deauthorize = () => {
+    Alert.alert(
+      'Deauthorize',
+      'Are you sure you want to remove this wallet authorization?',
+      [
+        {text: 'Cancel', style: 'cancel'},
+        {
+          text: 'Deauthorize',
+          style: 'destructive',
+          onPress: () => {
+            if (currentAuthToken !== null) {
+              SeedVault.deauthorizeSeed(currentAuthToken);
+              disconnect();
+            }
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -80,14 +153,18 @@ function App(): JSX.Element {
           </TouchableOpacity>
         ) : (
           <View style={styles.infoContainer}>
+            <Text style={styles.rpcText}>RPC: {RPC_URL}</Text>
             <Text style={styles.infoText}>{accountInfo}</Text>
+            <Text style={styles.balanceText}>Balance: {balance} XNT</Text>
             <TouchableOpacity
               style={styles.button}
-              onPress={() => {
-                setConnected(false);
-                setAccountInfo('');
-              }}>
+              onPress={disconnect}>
               <Text style={styles.buttonText}>Disconnect</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.button, styles.deauthButton]}
+              onPress={deauthorize}>
+              <Text style={styles.buttonText}>Remove Authorization</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -112,6 +189,12 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 32,
     borderRadius: 30,
+    marginBottom: 16,
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  deauthButton: {
+    backgroundColor: '#FF4444',
   },
   buttonText: {
     color: '#fff',
@@ -120,13 +203,25 @@ const styles = StyleSheet.create({
   },
   infoContainer: {
     alignItems: 'center',
+    width: '100%',
+  },
+  rpcText: {
+    color: '#888',
+    fontSize: 12,
+    marginBottom: 16,
   },
   infoText: {
     color: '#fff',
     fontSize: 14,
     textAlign: 'center',
-    marginBottom: 20,
-    lineHeight: 24,
+    marginBottom: 16,
+    lineHeight: 22,
+  },
+  balanceText: {
+    color: '#00FF00',
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 24,
   },
 });
 
