@@ -6,9 +6,14 @@ import {
   TouchableOpacity,
   Alert,
   View,
+  ActivityIndicator,
+  Image,
 } from 'react-native';
 import {PermissionsAndroid, Platform} from 'react-native';
-import {SeedVault, SeedVaultPermissionAndroid} from '@solana-mobile/seed-vault-lib';
+import {
+  SeedVault,
+  SeedVaultPermissionAndroid,
+} from '@solana-mobile/seed-vault-lib';
 
 const RPC_URL = 'https://rpc.mainnet.x1.xyz';
 
@@ -35,6 +40,7 @@ function App(): JSX.Element {
   const [accountInfo, setAccountInfo] = useState<string>('');
   const [balance, setBalance] = useState<string>('');
   const [currentAuthToken, setCurrentAuthToken] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   const checkAndRequestPermission = async (): Promise<boolean> => {
     if (Platform.OS !== 'android') {
@@ -85,7 +91,7 @@ function App(): JSX.Element {
       setAccountInfo(info);
       setConnected(true);
       setCurrentAuthToken(authToken);
-      
+
       await fetchBalance(account.publicKeyEncoded);
     } else {
       Alert.alert('No Accounts', 'No accounts found in Seed Vault');
@@ -93,16 +99,19 @@ function App(): JSX.Element {
   };
 
   const connectSeedVault = async () => {
+    setIsLoading(true);
     try {
       const hasPermission = await checkAndRequestPermission();
       if (!hasPermission) {
+        setIsLoading(false);
         return;
       }
 
       const authorizedSeeds = await SeedVault.getAuthorizedSeeds();
-      
+
       if (authorizedSeeds.length > 0) {
         await getAccountInfo(authorizedSeeds[0].authToken);
+        setIsLoading(false);
         return;
       }
 
@@ -112,9 +121,11 @@ function App(): JSX.Element {
         await getAccountInfo(result.authToken);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       Alert.alert('Error', `Failed to connect: ${errorMessage}`);
     }
+    setIsLoading(false);
   };
 
   const disconnect = () => {
@@ -148,17 +159,34 @@ function App(): JSX.Element {
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         {!connected ? (
-          <TouchableOpacity style={styles.button} onPress={connectSeedVault}>
-            <Text style={styles.buttonText}>Connect Seed Vault</Text>
-          </TouchableOpacity>
+          <View style={styles.loginContainer}>
+            <View style={styles.logoContainer}>
+              <Image
+                source={require('./assets/image/memo-wallet-logo-512.png')}
+                style={styles.logo}
+              />
+            </View>
+            <Text style={styles.title}>MEMO Wallet</Text>
+
+            <TouchableOpacity
+              style={styles.button}
+              onPress={connectSeedVault}
+              disabled={isLoading}>
+              {isLoading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>Connect Seed Vault</Text>
+              )}
+            </TouchableOpacity>
+
+            <Text style={styles.hint}>Powered by X1 & Solana</Text>
+          </View>
         ) : (
           <View style={styles.infoContainer}>
             <Text style={styles.rpcText}>RPC: {RPC_URL}</Text>
             <Text style={styles.infoText}>{accountInfo}</Text>
             <Text style={styles.balanceText}>Balance: {balance} XNT</Text>
-            <TouchableOpacity
-              style={styles.button}
-              onPress={disconnect}>
+            <TouchableOpacity style={styles.button} onPress={disconnect}>
               <Text style={styles.buttonText}>Disconnect</Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -184,14 +212,38 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
+  loginContainer: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  logoContainer: {
+    marginBottom: 24,
+  },
+  logo: {
+    width: 80,
+    height: 80,
+    borderRadius: 16,
+  },
+  title: {
+    color: '#fff',
+    fontSize: 32,
+    fontWeight: 'bold',
+    marginBottom: 48,
+  },
+  hint: {
+    color: '#555',
+    fontSize: 12,
+    marginTop: 24,
+  },
   button: {
-    backgroundColor: '#9945FF',
+    backgroundColor: '#38B6FF',
     paddingVertical: 16,
-    paddingHorizontal: 32,
+    paddingHorizontal: 48,
     borderRadius: 30,
     marginBottom: 16,
     minWidth: 200,
     alignItems: 'center',
+    minHeight: 56,
   },
   deauthButton: {
     backgroundColor: '#FF4444',

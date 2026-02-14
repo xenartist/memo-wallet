@@ -1,4 +1,4 @@
-package com.memowallet;
+package rip.memo.wallet;
 
 import com.facebook.react.ReactActivity;
 import com.facebook.react.ReactActivityDelegate;

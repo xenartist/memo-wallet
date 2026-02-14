@@ -36,3 +36,21 @@ Usage:
 - `npm run android` - Run Android
 - `npm run lint` - Lint code
 - `npm test` - Run tests
+
+## Build APK
+
+Debug APK 默认已包含 JS bundle，可独立运行（无需 Metro）:
+
+```bash
+cd android && ./gradlew assembleDebug
+```
+
+APK 位置: `android/app/build/outputs/apk/debug/app-debug.apk`
+
+安装到设备:
+
+```bash
+adb install android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+配置说明: 在 `android/app/build.gradle` 中设置 `debuggableVariants = []` 使 debug build 也打包 JS。
