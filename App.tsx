@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
   logo: {
     width: 80,
     height: 80,
-    borderRadius: 16,
+    borderRadius: 12,
   },
   title: {
     color: '#fff',
@@ -239,7 +239,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#38B6FF',
     paddingVertical: 16,
     paddingHorizontal: 48,
-    borderRadius: 30,
+    borderRadius: 12,
     marginBottom: 16,
     minWidth: 200,
     alignItems: 'center',
