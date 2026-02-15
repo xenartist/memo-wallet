@@ -241,8 +241,28 @@ function App(): JSX.Element {
         <ScrollView style={styles.tokenList}>
           {tokens.map((token, index) => (
             <View key={index} style={styles.tokenItem}>
-              <View style={styles.tokenIcon}>
-                <Text style={styles.tokenIconText}>{token.symbol[0]}</Text>
+              <View style={styles.tokenIconContainer}>
+                <View style={styles.tokenIcon}>
+                  <Image
+                    source={
+                      token.symbol === 'XNT'
+                        ? require('./assets/image/xnt-token.jpeg')
+                        : require('./assets/image/sol-token.png')
+                    }
+                    style={styles.tokenImage}
+                  />
+                </View>
+                <View
+                  style={[
+                    styles.networkBadge,
+                    token.symbol === 'XNT'
+                      ? styles.networkBadgeX1
+                      : styles.networkBadgeSolana,
+                  ]}>
+                  <Text style={styles.networkBadgeText}>
+                    {token.symbol === 'XNT' ? 'X1' : 'SOL'}
+                  </Text>
+                </View>
               </View>
               <View style={styles.tokenInfo}>
                 <Text style={styles.tokenSymbol}>{token.symbol}</Text>
@@ -485,6 +505,10 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 8,
   },
+  tokenIconContainer: {
+    position: 'relative',
+    marginRight: 12,
+  },
   tokenIcon: {
     width: 40,
     height: 40,
@@ -492,11 +516,35 @@ const styles = StyleSheet.create({
     backgroundColor: '#38B6FF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    overflow: 'hidden',
+  },
+  tokenImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   tokenIconText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: 'bold',
+  },
+  networkBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  networkBadgeX1: {
+    backgroundColor: '#38B6FF',
+  },
+  networkBadgeSolana: {
+    backgroundColor: '#9945FF',
+  },
+  networkBadgeText: {
+    color: '#fff',
+    fontSize: 8,
     fontWeight: 'bold',
   },
   tokenInfo: {
