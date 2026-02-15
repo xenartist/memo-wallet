@@ -12,22 +12,23 @@ React Native wallet application development.
 - `sessions/` - Session memory storage
 - `assets/` - Images and static assets
 
+## Development Workflow
+
+**重要**: 本项目直接在 Android 真机上调试，不使用 Metro bundler 或 npm start/ios/android。
+
+所有开发调试流程：
+
+1. 修改代码
+2. 编译 APK 并推送到手机
+3. 在手机上查看效果
+
 ## Development Commands
 
 ```bash
-# Start Metro bundler
-npm start
-
-# Run iOS
-npm run ios
-
-# Run Android
-npm run android
-
 # Lint code
 npm run lint
 
-# Run all tests
+# Run all tests (Jest 单元测试，非真机测试)
 npm test
 
 # Run a single test file
