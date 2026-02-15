@@ -8,7 +8,218 @@ React Native wallet application development.
 - `index.js` - React Native entry
 - `ios/` - iOS native code
 - `android/` - Android native code
+- `__tests__/` - Test files
 - `sessions/` - Session memory storage
+- `assets/` - Images and static assets
+
+## Development Commands
+
+```bash
+# Start Metro bundler
+npm start
+
+# Run iOS
+npm run ios
+
+# Run Android
+npm run android
+
+# Lint code
+npm run lint
+
+# Run all tests
+npm test
+
+# Run a single test file
+npm test -- App.test.tsx
+
+# Run a single test (by name)
+npm test -- -t "renders correctly"
+
+# Run tests in watch mode
+npm test -- --watch
+```
+
+## Build APK
+
+Debug APK 默认已包含 JS bundle，可独立运行（无需 Metro）:
+
+```bash
+cd android && ./gradlew assembleDebug
+```
+
+APK 位置: `android/app/build/outputs/apk/debug/app-debug.apk`
+
+安装到设备:
+
+```bash
+adb install android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+配置说明: 在 `android/app/build.gradle` 中设置 `debuggableVariants = []` 使 debug build 也打包 JS。
+
+## Code Style Guidelines
+
+### General Rules
+
+- Follow React Native conventions as defined by `@react-native/eslint-config`
+- Use TypeScript for all new code (project uses TypeScript 4.8.4)
+- Use functional components with hooks instead of class components
+
+### Imports
+
+Organize imports in the following order (separate with blank lines):
+
+1. React core (`import React, { useState } from 'react'`)
+2. React Native modules (`import { View, Text } from 'react-native'`)
+3. Third-party libraries (`import { SeedVault } from '@solana-mobile/seed-vault-lib'`)
+4. Local assets (`import logo from './assets/logo.png'`)
+
+```typescript
+import React, {useState, useEffect} from 'react';
+import {
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  Alert,
+} from 'react-native';
+import {SeedVault} from '@solana-mobile/seed-vault-lib';
+
+import MyComponent from './components/MyComponent';
+import {colors} from './theme';
+```
+
+### Naming Conventions
+
+- **Components**: PascalCase (e.g., `WalletScreen`, `TokenItem`)
+- **Functions**: camelCase (e.g., `fetchBalances`, `connectSeedVault`)
+- **Variables**: camelCase (e.g., `publicKey`, `isLoading`)
+- **Constants**: UPPER_SNAKE_CASE for runtime constants, camelCase for config objects
+- **Interfaces/Types**: PascalCase with descriptive names (e.g., `TokenInfo`, `WalletState`)
+- **Files**: kebab-case for utilities, PascalCase for components (e.g., `utils.ts`, `WalletScreen.tsx`)
+
+### TypeScript
+
+- Always define return types for functions, especially async functions
+- Use interfaces for object shapes, avoid `any` type
+- Use `null` instead of `undefined` for nullable values
+- Prefer explicit type annotations over type inference for function parameters
+
+```typescript
+// Good
+interface TokenInfo {
+  symbol: string;
+  name: string;
+  balance: string;
+  icon?: number;
+}
+
+const fetchBalances = async (pk: string): Promise<void> => {
+  // ...
+};
+
+// Avoid
+const fetchBalances = async pk => {
+  // ...
+};
+```
+
+### Error Handling
+
+- Always wrap async operations in try/catch blocks
+- Use `instanceof Error` checks before accessing error message
+- Display user-friendly error messages via Alert or toast
+- Log errors to console for debugging
+
+```typescript
+// Good pattern
+try {
+  const result = await someAsyncOperation();
+  // handle result
+} catch (error) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  console.error('Operation failed:', error);
+  Alert.alert('Error', `Failed to complete operation: ${errorMessage}`);
+}
+```
+
+### Component Patterns
+
+- Use functional components with hooks
+- Keep components focused (single responsibility)
+- Extract reusable logic into custom hooks
+- Define styles using StyleSheet.create at component bottom
+
+```typescript
+interface Props {
+  title: string;
+  onPress: () => void;
+}
+
+function MyComponent({ title, onPress }: Props): JSX.Element {
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handlePress = () => {
+    setIsLoading(true);
+    onPress();
+  };
+
+  return (
+    <TouchableOpacity onPress={handlePress}>
+      <Text>{title}</Text>
+    </TouchableOverflow>
+  );
+}
+
+const styles = StyleSheet.create({
+  // styles here
+});
+
+export default MyComponent;
+```
+
+### Styling
+
+- Use StyleSheet.create for all styles (enables optimization)
+- Define colors and constants outside components for reuse
+- Use flexbox for layout (flex, flexDirection, justifyContent, alignItems)
+- Use Platform.select for platform-specific styles when needed
+
+```typescript
+import {Platform, StyleSheet} from 'react-native';
+
+const styles = StyleSheet.create({
+  text: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+});
+```
+
+### Platform-Specific Code
+
+- Use `Platform.OS` for OS checks (`'ios'` or `'android'`)
+- Use `Platform.select()` for platform-specific values
+- Use `PermissionsAndroid` for Android permissions
+
+### Testing
+
+- Place tests in `__tests__/` directory with `.test.tsx` or `.test.ts` extension
+- Use `@jest/globals` for test imports
+- Use `react-test-renderer` for snapshot testing
+
+```typescript
+import 'react-native';
+import React from 'react';
+import renderer from 'react-test-renderer';
+import {it} from '@jest/globals';
+
+import MyComponent from '../MyComponent';
+
+it('renders correctly', () => {
+  renderer.create(<MyComponent />);
+});
+```
 
 ## Skills
 
@@ -28,29 +239,3 @@ Usage:
 2. If exists, ask user to restore
 3. Load `sessions/MEMORY.md` and recent session summaries
 4. Inject historical context into prompt
-
-## Development Commands
-
-- `npm start` - Start Metro bundler
-- `npm run ios` - Run iOS
-- `npm run android` - Run Android
-- `npm run lint` - Lint code
-- `npm test` - Run tests
-
-## Build APK
-
-Debug APK 默认已包含 JS bundle，可独立运行（无需 Metro）:
-
-```bash
-cd android && ./gradlew assembleDebug
-```
-
-APK 位置: `android/app/build/outputs/apk/debug/app-debug.apk`
-
-安装到设备:
-
-```bash
-adb install android/app/build/outputs/apk/debug/app-debug.apk
-```
-
-配置说明: 在 `android/app/build.gradle` 中设置 `debuggableVariants = []` 使 debug build 也打包 JS。
