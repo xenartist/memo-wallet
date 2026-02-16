@@ -18,6 +18,7 @@ import {
   SeedVault,
   SeedVaultPermissionAndroid,
 } from '@solana-mobile/seed-vault-lib';
+import FontAwesome from '@react-native-vector-icons/fontawesome';
 
 const SOLANA_RPC_URL = 'https://rpc.mainnet.x1.xyz';
 
@@ -253,10 +254,15 @@ function App(): JSX.Element {
       <View style={styles.header}>
         <TouchableOpacity onPress={copyAddress} style={styles.addressContainer}>
           <Text style={styles.addressText}>{formatAddress(publicKey)}</Text>
-          <Text style={styles.copyIcon}> Copy</Text>
+          <FontAwesome
+            name="copy"
+            size={14}
+            color="#38B6FF"
+            style={{marginLeft: 8}}
+          />
         </TouchableOpacity>
         <TouchableOpacity style={styles.settingsButton}>
-          <Text style={styles.settingsIcon}>Settings</Text>
+          <FontAwesome name="cog" size={18} color="#888" />
         </TouchableOpacity>
       </View>
 
@@ -268,19 +274,19 @@ function App(): JSX.Element {
       <View style={styles.actionRow}>
         <TouchableOpacity style={styles.actionButton}>
           <View style={styles.actionIcon}>
-            <Text style={styles.actionIconText}>↑</Text>
+            <FontAwesome name="arrow-up" size={20} color="#38B6FF" />
           </View>
           <Text style={styles.actionText}>Send</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.actionButton}>
           <View style={styles.actionIcon}>
-            <Text style={styles.actionIconText}>↓</Text>
+            <FontAwesome name="arrow-down" size={20} color="#38B6FF" />
           </View>
           <Text style={styles.actionText}>Receive</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.actionButton}>
           <View style={styles.actionIcon}>
-            <Text style={styles.actionIconText}>⇄</Text>
+            <FontAwesome name="exchange" size={20} color="#38B6FF" />
           </View>
           <Text style={styles.actionText}>Swap</Text>
         </TouchableOpacity>
@@ -334,6 +340,12 @@ function App(): JSX.Element {
       <TouchableOpacity
         style={styles.navItem}
         onPress={() => setActiveTab('portfolio')}>
+        <FontAwesome
+          name="briefcase"
+          size={20}
+          color={activeTab === 'portfolio' ? '#38B6FF' : '#888'}
+          style={styles.navIconImg}
+        />
         <Text
           style={[
             styles.navIcon,
@@ -345,6 +357,12 @@ function App(): JSX.Element {
       <TouchableOpacity
         style={styles.navItem}
         onPress={() => setActiveTab('swap')}>
+        <FontAwesome
+          name="exchange"
+          size={20}
+          color={activeTab === 'swap' ? '#38B6FF' : '#888'}
+          style={styles.navIconImg}
+        />
         <Text
           style={[
             styles.navIcon,
@@ -633,6 +651,9 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     paddingVertical: 8,
+  },
+  navIconImg: {
+    marginBottom: 2,
   },
   navIcon: {
     color: '#888',
