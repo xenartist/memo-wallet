@@ -30,6 +30,8 @@ import {
   findXNTPools,
   getPoolPrice,
   getTokenBalance,
+  getTokenMetadata,
+  TokenMetadata,
 } from './src/xdex';
 
 interface TokenInfo {
@@ -61,6 +63,7 @@ function App(): JSX.Element {
   const [isLoadingSwap, setIsLoadingSwap] = useState(false);
   const [xntBalance, setXntBalance] = useState<string>('0.00');
   const [usdcBalance, setUsdcBalance] = useState<string>('0.00');
+  const [usdcMetadata, setUsdcMetadata] = useState<TokenMetadata | null>(null);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -87,11 +90,14 @@ function App(): JSX.Element {
       try {
         setIsLoadingSwap(true);
 
-        const [nativeXntBal, pools, usdcBal] = await Promise.all([
+        const [nativeXntBal, pools, usdcBal, usdcMeta] = await Promise.all([
           rpcCall('getBalance', [publicKey]),
           findXNTPools(),
           getTokenBalance(publicKey, USDC_MINT),
+          getTokenMetadata(USDC_MINT),
         ]);
+
+        setUsdcMetadata(usdcMeta);
 
         const xntBalanceLamports = nativeXntBal.value || 0;
         setXntBalance((xntBalanceLamports / 1e9).toFixed(4));
@@ -512,6 +518,21 @@ function App(): JSX.Element {
                   onPress={() =>
                     setSwapFromToken(swapFromToken === 'XNT' ? 'USDC' : 'XNT')
                   }>
+                  {swapFromToken === 'XNT' ? (
+                    <Image
+                      source={require('./assets/image/xnt-token.jpeg')}
+                      style={styles.swapTokenIcon}
+                    />
+                  ) : swapFromToken === 'USDC' && usdcMetadata?.logo_uri ? (
+                    <Image
+                      source={{uri: usdcMetadata.logo_uri}}
+                      style={styles.swapTokenIcon}
+                    />
+                  ) : (
+                    <View style={styles.swapTokenIconPlaceholder}>
+                      <Text style={styles.swapTokenIconText}>U</Text>
+                    </View>
+                  )}
                   <Text style={styles.swapTokenSymbol}>
                     {swapFromToken === 'XNT' ? 'XNT' : 'USDC.X'}
                   </Text>
@@ -527,7 +548,7 @@ function App(): JSX.Element {
                   value={swapFromAmount}
                   onChangeText={handleFromAmountChange}
                   placeholder="0.00"
-                  placeholderTextColor="#555"
+                  placeholderTextColor="#888"
                   keyboardType="decimal-pad"
                 />
               </View>
@@ -547,6 +568,21 @@ function App(): JSX.Element {
                   onPress={() =>
                     setSwapToToken(swapToToken === 'XNT' ? 'USDC' : 'XNT')
                   }>
+                  {swapToToken === 'XNT' ? (
+                    <Image
+                      source={require('./assets/image/xnt-token.jpeg')}
+                      style={styles.swapTokenIcon}
+                    />
+                  ) : swapToToken === 'USDC' && usdcMetadata?.logo_uri ? (
+                    <Image
+                      source={{uri: usdcMetadata.logo_uri}}
+                      style={styles.swapTokenIcon}
+                    />
+                  ) : (
+                    <View style={styles.swapTokenIconPlaceholder}>
+                      <Text style={styles.swapTokenIconText}>U</Text>
+                    </View>
+                  )}
                   <Text style={styles.swapTokenSymbol}>
                     {swapToToken === 'XNT' ? 'XNT' : 'USDC.X'}
                   </Text>
@@ -936,6 +972,26 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginRight: 4,
   },
+  swapTokenIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    marginRight: 6,
+  },
+  swapTokenIconPlaceholder: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#444',
+    marginRight: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  swapTokenIconText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
   tokenBalance: {
     color: '#888',
     fontSize: 12,
@@ -953,7 +1009,7 @@ const styles = StyleSheet.create({
     minWidth: 120,
   },
   outputAmount: {
-    color: '#fff',
+    color: '#888',
     fontSize: 24,
     fontWeight: '600',
   },

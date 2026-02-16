@@ -49,6 +49,27 @@ export interface TokenMetadata {
   logo_uri: string | null;
 }
 
+const KNOWN_TOKEN_METADATA: {[mint: string]: TokenMetadata} = {
+  B69chRzqzDCmdB5WYB8NRu5Yv5ZA95ABiZcdzCgGm9Tq: {
+    mint: 'B69chRzqzDCmdB5WYB8NRu5Yv5ZA95ABiZcdzCgGm9Tq',
+    name: 'USDC.X',
+    symbol: 'USDC.X',
+    logo_uri: null,
+  },
+  So11111111111111111111111111111111111111111: {
+    mint: 'So11111111111111111111111111111111111111111111',
+    name: 'XNT',
+    symbol: 'XNT',
+    logo_uri: null,
+  },
+  So11111111111111111111111111111111111111112: {
+    mint: 'So11111111111111111111111111111111111111112',
+    name: 'Wrapped XNT',
+    symbol: 'WXNT',
+    logo_uri: null,
+  },
+};
+
 const X1_RPC_URL = 'https://rpc.mainnet.x1.xyz';
 
 export const rpcCall = async (
@@ -322,4 +343,53 @@ export function calculateMinimumOutput(
 
   const minimumOutput = estimatedOutputTokens * (1 - slippagePercent / 100);
   return Math.floor(minimumOutput * Math.pow(10, outputDecimals));
+}
+
+export async function getTokenMetadata(
+  mintAddress: string,
+): Promise<TokenMetadata> {
+  const knownToken = KNOWN_TOKEN_METADATA[mintAddress];
+
+  let name: string | null = knownToken?.name || null;
+  let symbol: string | null = knownToken?.symbol || null;
+  let logoUri: string | null = knownToken?.logo_uri || null;
+
+  try {
+    const result = await rpcCall('getAccountInfo', [
+      mintAddress,
+      {encoding: 'jsonParsed'},
+    ]);
+
+    const parsed = result?.value?.data?.parsed;
+    if (parsed?.type === 'mint') {
+      const info = parsed.info;
+      const extensions = info.extensions || [];
+
+      for (const ext of extensions) {
+        if (ext.extension === 'tokenMetadata' && ext.state) {
+          if (!name) {
+            name = ext.state.name || null;
+          }
+          if (!symbol) {
+            symbol = ext.state.symbol || null;
+          }
+          const uri = ext.state.uri || null;
+          if (uri && !logoUri) {
+            try {
+              const response = await fetch(uri);
+              const metadata = await response.json();
+              logoUri = metadata.image || null;
+            } catch {
+              console.log('Failed to fetch metadata URI:', uri);
+            }
+          }
+          break;
+        }
+      }
+    }
+  } catch (error) {
+    console.log('Failed to get token metadata:', error);
+  }
+
+  return {mint: mintAddress, name, symbol, logo_uri: logoUri};
 }
