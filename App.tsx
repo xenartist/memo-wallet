@@ -32,14 +32,8 @@ import {
   getTokenBalance,
   getTokenMetadata,
   TokenMetadata,
-} from './src/xdex';
-
-interface TokenInfo {
-  symbol: string;
-  name: string;
-  balance: string;
-  icon?: number;
-}
+} from './src/swap';
+import {fetchAllTokens, PortfolioToken} from './src/portfolio';
 
 function App(): JSX.Element {
   const [connected, setConnected] = useState(false);
@@ -49,9 +43,27 @@ function App(): JSX.Element {
   const [isLoading, setIsLoading] = useState(false);
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [activeTab, setActiveTab] = useState('portfolio');
-  const [tokens, setTokens] = useState<TokenInfo[]>([
-    {symbol: 'XNT', name: 'XNT', balance: '0.00'},
-    {symbol: 'SOL', name: 'Solana', balance: '0.00'},
+  const [tokens, setTokens] = useState<PortfolioToken[]>([
+    {
+      symbol: 'XNT',
+      name: 'XNT',
+      balance: '0.00',
+      mint: null,
+      network: 'X1',
+      icon_uri: 'https://app.xdex.xyz/assets/images/tokens/x1.webp',
+      decimals: 9,
+      rawBalance: 0,
+    },
+    {
+      symbol: 'SOL',
+      name: 'Solana',
+      balance: '0.00',
+      mint: null,
+      network: 'Solana',
+      icon_uri: null,
+      decimals: 9,
+      rawBalance: 0,
+    },
   ]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -167,17 +179,13 @@ function App(): JSX.Element {
 
   const fetchBalances = async (pk: string): Promise<void> => {
     try {
-      const [xntResult, solResult] = await Promise.all([
-        rpcCall('getBalance', [pk]),
-        rpcCall('getBalance', [pk], 'https://api.mainnet-beta.solana.com'),
-      ]);
-      const balanceXNT = xntResult.value / 1000000000;
-      const balanceSOL = solResult.value / 1000000000;
-      setBalance(balanceXNT.toFixed(4));
-      setTokens([
-        {symbol: 'XNT', name: 'XNT', balance: balanceXNT.toFixed(4)},
-        {symbol: 'SOL', name: 'Solana', balance: balanceSOL.toFixed(4)},
-      ]);
+      const allTokens = await fetchAllTokens(pk);
+      setTokens(allTokens);
+      // Set main balance from XNT (first native token)
+      const xntToken = allTokens.find(
+        t => t.symbol === 'XNT' && t.network === 'X1',
+      );
+      setBalance(xntToken ? xntToken.balance : '0.00');
     } catch (error) {
       console.error('Failed to fetch balances:', error);
       setBalance('Failed to fetch');
@@ -419,24 +427,38 @@ function App(): JSX.Element {
           <View key={index} style={styles.tokenItem}>
             <View style={styles.tokenIconContainer}>
               <View style={styles.tokenIcon}>
-                <Image
-                  source={
-                    token.symbol === 'XNT'
-                      ? require('./assets/image/xnt-token.jpeg')
-                      : require('./assets/image/sol-token.png')
-                  }
-                  style={styles.tokenImage}
-                />
+                {token.symbol === 'SOL' && token.mint === null ? (
+                  <Image
+                    source={require('./assets/image/sol-token.png')}
+                    style={styles.tokenImage}
+                  />
+                ) : token.icon_uri ? (
+                  <Image
+                    source={{uri: token.icon_uri}}
+                    style={styles.tokenImage}
+                  />
+                ) : token.symbol === 'XNT' && token.mint === null ? (
+                  <Image
+                    source={require('./assets/image/xnt-token.jpeg')}
+                    style={styles.tokenImage}
+                  />
+                ) : (
+                  <View style={styles.tokenPlaceholder}>
+                    <Text style={styles.tokenPlaceholderText}>
+                      {token.symbol.charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
               </View>
               <View
                 style={[
                   styles.networkBadge,
-                  token.symbol === 'XNT'
+                  token.network === 'X1'
                     ? styles.networkBadgeX1
                     : styles.networkBadgeSolana,
                 ]}>
                 <Text style={styles.networkBadgeText}>
-                  {token.symbol === 'XNT' ? 'X1' : 'SOL'}
+                  {token.network === 'X1' ? 'X1' : 'SOL'}
                 </Text>
               </View>
             </View>
@@ -446,7 +468,6 @@ function App(): JSX.Element {
             </View>
             <View style={styles.tokenBalance}>
               <Text style={styles.tokenBalanceText}>{token.balance}</Text>
-              <Text style={styles.tokenBalanceUsd}>${token.balance}</Text>
             </View>
           </View>
         ))}
@@ -962,6 +983,19 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
+  },
+  tokenPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#333',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tokenPlaceholderText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
   },
   tokenIconText: {
     color: '#fff',
