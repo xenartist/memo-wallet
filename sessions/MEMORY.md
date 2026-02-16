@@ -36,6 +36,22 @@ Persistent storage of important information, auto-loaded in every session.
 - 原生 XNT: 使用 getBalance RPC
 - SPL Token (USDC.X, WXNT): 使用 getTokenAccountsByOwner
 
+## 文件结构
+
+```
+src/
+├── rpc.ts        # 共享 RPC 工具和常量
+├── portfolio.ts  # Portfolio 资产查询逻辑
+├── swap.ts       # Swap 相关逻辑
+```
+
+## 代币发现逻辑
+
+- 使用 getTokenAccountsByOwner 查询钱包所有 SPL 代币
+- 需要分别查询 TOKEN_PROGRAM 和 TOKEN_2022_PROGRAM 两个 programId
+- 需要分别在 X1 和 Solana 两条链上查询
+- 图标获取: 链上 metadata -> 本地图片 -> 首字母占位符
+
 ## Recent Changes (2026-02-16)
 
 - 添加授权状态检测，未授权显示 "Connect Seed Vault"，已授权显示 "Enter Seed Vault"
@@ -63,3 +79,24 @@ Persistent storage of important information, auto-loaded in every session.
 ## Pending Tasks
 
 - 实现 Swap 交易签名功能 (需要 Seed Vault 签名集成)
+
+---
+
+## Recent Changes (2026-02-17)
+
+### 代码重构：按功能拆分文件
+
+- `src/rpc.ts` (新建): RPC 端点、常量、编码工具、getTokenMetadata
+- `src/portfolio.ts` (新建): fetchAllTokens() 并行查询 X1+Solana 6 个 RPC，自动发现钱包所有 SPL 代币
+- `src/swap.ts` (重构自 xdex.ts): 保留 swap 相关逻辑
+
+### Portfolio 资产显示扩展
+
+- 支持显示钱包在 X1 和 Solana 两条链上持有的所有 SPL 代币
+- 代币图标: 链上 metadata URI -> 本地图片 -> 首字母占位符
+- 排序: 原生代币 (XNT, SOL) 优先，SPL 代币按余额降序
+
+### 重要规则
+
+- App.tsx 仅负责 UI 和状态管理，业务逻辑放在 src/ 模块
+- 所有 RPC 函数支持 rpcUrl 参数实现多链

@@ -4,7 +4,7 @@ React Native wallet application development.
 
 ## Project Structure
 
-- `App.tsx` - Main app entry
+- `App.tsx` - Main app entry (UI + state management only)
 - `index.js` - React Native entry
 - `ios/` - iOS native code
 - `android/` - Android native code
@@ -12,7 +12,42 @@ React Native wallet application development.
 - `sessions/` - Session memory storage
 - `assets/` - Images and static assets
 - `src/` - Source code modules
-  - `src/xdex.ts` - xDEX swap functionality
+  - `src/rpc.ts` - Shared RPC utilities, constants, encoding
+  - `src/portfolio.ts` - Portfolio asset discovery logic
+  - `src/swap.ts` - xDEX swap functionality
+
+## Code Organization Principles
+
+### File Responsibilities
+
+- `src/rpc.ts`: All blockchain-shared utilities (RPC calls, encoding/decoding, constants)
+- `src/portfolio.ts`: Portfolio/asset-related logic (token discovery, balance queries)
+- `src/swap.ts`: Swap/trading-related logic (pool queries, price calculation, trade instructions)
+- `App.tsx`: Only contains UI rendering and state management, calls functions from modules
+
+### Multi-Chain Support
+
+All RPC utility functions should support an optional `rpcUrl` parameter to work with different chains:
+
+- X1 RPC: `https://rpc.mainnet.x1.xyz`
+- Solana RPC: `https://api.mainnet-beta.solana.com`
+
+### Token Discovery
+
+When discovering SPL tokens in a wallet, query both TOKEN_PROGRAM and TOKEN_2022_PROGRAM:
+
+```typescript
+rpcCall('getTokenAccountsByOwner', [
+  wallet,
+  {programId: TOKEN_PROGRAM},
+  {encoding: 'jsonParsed'},
+]);
+rpcCall('getTokenAccountsByOwner', [
+  wallet,
+  {programId: TOKEN_2022_PROGRAM},
+  {encoding: 'jsonParsed'},
+]);
+```
 
 ## Development Workflow
 
