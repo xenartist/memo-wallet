@@ -14,6 +14,7 @@ import {
   Platform,
   PermissionsAndroid,
   TextInput,
+  RefreshControl,
 } from 'react-native';
 import {
   SeedVault,
@@ -52,6 +53,7 @@ function App(): JSX.Element {
     {symbol: 'XNT', name: 'XNT', balance: '0.00'},
     {symbol: 'SOL', name: 'Solana', balance: '0.00'},
   ]);
+  const [refreshing, setRefreshing] = useState(false);
 
   const [swapFromToken, setSwapFromToken] = useState<'XNT' | 'USDC'>('XNT');
   const [swapToToken, setSwapToToken] = useState<'XNT' | 'USDC'>('USDC');
@@ -181,6 +183,15 @@ function App(): JSX.Element {
       setBalance('Failed to fetch');
     }
   };
+
+  const onRefresh = useCallback(async () => {
+    if (!publicKey) {
+      return;
+    }
+    setRefreshing(true);
+    await fetchBalances(publicKey);
+    setRefreshing(false);
+  }, [publicKey]);
 
   const getAccountInfo = async (authToken: number) => {
     const accounts = await SeedVault.getUserWallets(authToken);
@@ -345,7 +356,18 @@ function App(): JSX.Element {
   );
 
   const renderWalletScreen = () => (
-    <View style={styles.walletContainer}>
+    <ScrollView
+      style={styles.walletContainer}
+      contentContainerStyle={styles.walletContent}
+      alwaysBounceVertical={true}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor="#38B6FF"
+          colors={['#38B6FF']}
+        />
+      }>
       <View style={styles.header}>
         <TouchableOpacity onPress={copyAddress} style={styles.addressContainer}>
           <Text style={styles.addressText}>{formatAddress(publicKey)}</Text>
@@ -393,45 +415,43 @@ function App(): JSX.Element {
 
       <View style={styles.tokenSection}>
         <Text style={styles.sectionTitle}>Assets</Text>
-        <ScrollView style={styles.tokenList}>
-          {tokens.map((token, index) => (
-            <View key={index} style={styles.tokenItem}>
-              <View style={styles.tokenIconContainer}>
-                <View style={styles.tokenIcon}>
-                  <Image
-                    source={
-                      token.symbol === 'XNT'
-                        ? require('./assets/image/xnt-token.jpeg')
-                        : require('./assets/image/sol-token.png')
-                    }
-                    style={styles.tokenImage}
-                  />
-                </View>
-                <View
-                  style={[
-                    styles.networkBadge,
+        {tokens.map((token, index) => (
+          <View key={index} style={styles.tokenItem}>
+            <View style={styles.tokenIconContainer}>
+              <View style={styles.tokenIcon}>
+                <Image
+                  source={
                     token.symbol === 'XNT'
-                      ? styles.networkBadgeX1
-                      : styles.networkBadgeSolana,
-                  ]}>
-                  <Text style={styles.networkBadgeText}>
-                    {token.symbol === 'XNT' ? 'X1' : 'SOL'}
-                  </Text>
-                </View>
+                      ? require('./assets/image/xnt-token.jpeg')
+                      : require('./assets/image/sol-token.png')
+                  }
+                  style={styles.tokenImage}
+                />
               </View>
-              <View style={styles.tokenInfo}>
-                <Text style={styles.tokenSymbol}>{token.symbol}</Text>
-                <Text style={styles.tokenName}>{token.name}</Text>
-              </View>
-              <View style={styles.tokenBalance}>
-                <Text style={styles.tokenBalanceText}>{token.balance}</Text>
-                <Text style={styles.tokenBalanceUsd}>${token.balance}</Text>
+              <View
+                style={[
+                  styles.networkBadge,
+                  token.symbol === 'XNT'
+                    ? styles.networkBadgeX1
+                    : styles.networkBadgeSolana,
+                ]}>
+                <Text style={styles.networkBadgeText}>
+                  {token.symbol === 'XNT' ? 'X1' : 'SOL'}
+                </Text>
               </View>
             </View>
-          ))}
-        </ScrollView>
+            <View style={styles.tokenInfo}>
+              <Text style={styles.tokenSymbol}>{token.symbol}</Text>
+              <Text style={styles.tokenName}>{token.name}</Text>
+            </View>
+            <View style={styles.tokenBalance}>
+              <Text style={styles.tokenBalanceText}>{token.balance}</Text>
+              <Text style={styles.tokenBalanceUsd}>${token.balance}</Text>
+            </View>
+          </View>
+        ))}
       </View>
-    </View>
+    </ScrollView>
   );
 
   const renderBottomNav = () => (
@@ -827,7 +847,10 @@ const styles = StyleSheet.create({
   },
   walletContainer: {
     flex: 1,
+  },
+  walletContent: {
     padding: 16,
+    paddingBottom: 80,
   },
   header: {
     flexDirection: 'row',
