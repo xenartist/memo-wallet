@@ -1,4 +1,4 @@
-import React, {useState, useEffect} from 'react';
+import React, {useState, useEffect, useCallback} from 'react';
 import {
   SafeAreaView,
   StyleSheet,
@@ -13,6 +13,7 @@ import {
   Clipboard,
   Platform,
   PermissionsAndroid,
+  TextInput,
 } from 'react-native';
 import {
   SeedVault,
@@ -20,29 +21,16 @@ import {
 } from '@solana-mobile/seed-vault-lib';
 import FontAwesome from '@react-native-vector-icons/fontawesome';
 
-const SOLANA_RPC_URL = 'https://rpc.mainnet.x1.xyz';
-
-const rpcCall = async (
-  method: string,
-  params: any[] = [],
-  rpcUrl: string = SOLANA_RPC_URL,
-): Promise<any> => {
-  const response = await fetch(rpcUrl, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method,
-      params,
-    }),
-  });
-  const data = await response.json();
-  if (data.error) {
-    throw new Error(data.error.message);
-  }
-  return data.result;
-};
+import {
+  rpcCall,
+  USDC_MINT,
+  WRAPPED_XNT_MINT,
+  PoolInfo,
+  PoolPrice,
+  findXNTPools,
+  getPoolPrice,
+  getTokenBalance,
+} from './src/xdex';
 
 interface TokenInfo {
   symbol: string;
@@ -64,6 +52,16 @@ function App(): JSX.Element {
     {symbol: 'SOL', name: 'Solana', balance: '0.00'},
   ]);
 
+  const [swapFromToken, setSwapFromToken] = useState<'XNT' | 'USDC'>('XNT');
+  const [swapToToken, setSwapToToken] = useState<'XNT' | 'USDC'>('USDC');
+  const [swapFromAmount, setSwapFromAmount] = useState('');
+  const [swapToAmount, setSwapToAmount] = useState('');
+  const [swapPrice, setSwapPrice] = useState<PoolPrice | null>(null);
+  const [swapPool, setSwapPool] = useState<PoolInfo | null>(null);
+  const [isLoadingSwap, setIsLoadingSwap] = useState(false);
+  const [xntBalance, setXntBalance] = useState<string>('0.00');
+  const [usdcBalance, setUsdcBalance] = useState<string>('0.00');
+
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -80,6 +78,41 @@ function App(): JSX.Element {
     };
     initAuth();
   }, []);
+
+  useEffect(() => {
+    const loadSwapPool = async () => {
+      if (!publicKey) {
+        return;
+      }
+      try {
+        setIsLoadingSwap(true);
+
+        const [nativeXntBal, pools, usdcBal] = await Promise.all([
+          rpcCall('getBalance', [publicKey]),
+          findXNTPools(),
+          getTokenBalance(publicKey, USDC_MINT),
+        ]);
+
+        const xntBalanceLamports = nativeXntBal.value || 0;
+        setXntBalance((xntBalanceLamports / 1e9).toFixed(4));
+        setUsdcBalance((usdcBal / 1e6).toFixed(4));
+
+        if (pools.length > 0) {
+          const pool = pools[0];
+          setSwapPool(pool);
+          const price = await getPoolPrice(pool);
+          setSwapPrice(price);
+        }
+      } catch (error) {
+        console.error('Failed to load swap pool:', error);
+      } finally {
+        setIsLoadingSwap(false);
+      }
+    };
+    if (connected) {
+      loadSwapPool();
+    }
+  }, [connected, publicKey]);
 
   const checkAndRequestPermission = async (): Promise<boolean> => {
     if (Platform.OS !== 'android') {
@@ -173,12 +206,54 @@ function App(): JSX.Element {
     setIsLoading(false);
   };
 
-  const disconnect = () => {
+  const disconnect = (): void => {
     setConnected(false);
     setPublicKey('');
     setBalance('');
     setCurrentAuthToken(null);
     setIsAuthorized(false);
+  };
+
+  const calculateSwapOutput = useCallback(
+    (amount: string) => {
+      if (!amount || !swapPrice || !swapPool) {
+        setSwapToAmount('');
+        return;
+      }
+
+      const amountNum = parseFloat(amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        setSwapToAmount('');
+        return;
+      }
+
+      const inputMint = swapFromToken === 'XNT' ? WRAPPED_XNT_MINT : USDC_MINT;
+      const isInputToken0 = inputMint === swapPrice.token_0_mint;
+
+      let output: number;
+      if (isInputToken0) {
+        output = amountNum * swapPrice.price;
+      } else {
+        output = amountNum / swapPrice.price;
+      }
+
+      setSwapToAmount(output.toFixed(6));
+    },
+    [swapPrice, swapPool, swapFromToken],
+  );
+
+  const handleFromAmountChange = (text: string) => {
+    setSwapFromAmount(text);
+    calculateSwapOutput(text);
+  };
+
+  const handleSwapTokens = () => {
+    const newFromToken = swapToToken;
+    const newToToken = swapFromToken;
+    setSwapFromToken(newFromToken);
+    setSwapToToken(newToToken);
+    setSwapFromAmount('');
+    setSwapToAmount('');
   };
 
   const checkAuthorization = async (): Promise<boolean> => {
@@ -258,10 +333,12 @@ function App(): JSX.Element {
             name="copy"
             size={14}
             color="#38B6FF"
-            style={{marginLeft: 8}}
+            style={styles.copyIcon}
           />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.settingsButton}>
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => setActiveTab('settings')}>
           <FontAwesome name="cog" size={18} color="#888" />
         </TouchableOpacity>
       </View>
@@ -284,7 +361,9 @@ function App(): JSX.Element {
           </View>
           <Text style={styles.actionText}>Receive</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => setActiveTab('swap')}>
           <View style={styles.actionIcon}>
             <FontAwesome name="exchange" size={20} color="#38B6FF" />
           </View>
@@ -375,34 +454,154 @@ function App(): JSX.Element {
   );
 
   const renderSettingsScreen = () => (
-    <View style={styles.settingsContainer}>
-      <Text style={styles.settingsTitle}>Settings</Text>
-      <TouchableOpacity style={styles.settingItem} onPress={disconnect}>
-        <Text style={styles.settingText}>Disconnect Wallet</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.settingItem, styles.dangerItem]}
-        onPress={() => {
-          if (currentAuthToken !== null) {
-            SeedVault.deauthorizeSeed(currentAuthToken);
-            disconnect();
-          }
-        }}>
-        <Text style={[styles.settingText, styles.dangerText]}>
-          Remove Authorization
-        </Text>
-      </TouchableOpacity>
+    <View style={styles.screenContainer}>
+      <View style={styles.screenHeader}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => setActiveTab('portfolio')}>
+          <FontAwesome name="arrow-left" size={20} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.screenTitle}>Settings</Text>
+        <View style={styles.placeholder} />
+      </View>
+      <View style={styles.settingsContent}>
+        <TouchableOpacity style={styles.settingItem} onPress={disconnect}>
+          <Text style={styles.settingText}>Disconnect Wallet</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.settingItem, styles.dangerItem]}
+          onPress={() => {
+            if (currentAuthToken !== null) {
+              SeedVault.deauthorizeSeed(currentAuthToken);
+              disconnect();
+            }
+          }}>
+          <Text style={[styles.settingText, styles.dangerText]}>
+            Remove Authorization
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  const renderSwapScreen = () => (
+    <View style={styles.screenContainer}>
+      <View style={styles.screenHeader}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => setActiveTab('portfolio')}>
+          <FontAwesome name="arrow-left" size={20} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.screenTitle}>Swap</Text>
+        <View style={styles.placeholder} />
+      </View>
+
+      {isLoadingSwap ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#38B6FF" />
+          <Text style={styles.loadingText}>Loading pool...</Text>
+        </View>
+      ) : swapPrice ? (
+        <View style={styles.swapContent}>
+          <View style={styles.swapCard}>
+            <View style={styles.tokenRow}>
+              <View style={styles.tokenInfo}>
+                <Text style={styles.tokenLabel}>From</Text>
+                <TouchableOpacity
+                  style={styles.tokenSelector}
+                  onPress={() =>
+                    setSwapFromToken(swapFromToken === 'XNT' ? 'USDC' : 'XNT')
+                  }>
+                  <Text style={styles.swapTokenSymbol}>
+                    {swapFromToken === 'XNT' ? 'XNT' : 'USDC.X'}
+                  </Text>
+                  <FontAwesome name="chevron-down" size={12} color="#888" />
+                </TouchableOpacity>
+                <Text style={styles.tokenBalance}>
+                  Balance: {swapFromToken === 'XNT' ? xntBalance : usdcBalance}
+                </Text>
+              </View>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.amountInput}
+                  value={swapFromAmount}
+                  onChangeText={handleFromAmountChange}
+                  placeholder="0.00"
+                  placeholderTextColor="#555"
+                  keyboardType="decimal-pad"
+                />
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.swapDirectionButton}
+              onPress={handleSwapTokens}>
+              <FontAwesome name="arrow-down" size={16} color="#38B6FF" />
+            </TouchableOpacity>
+
+            <View style={styles.tokenRow}>
+              <View style={styles.tokenInfo}>
+                <Text style={styles.tokenLabel}>To</Text>
+                <TouchableOpacity
+                  style={styles.tokenSelector}
+                  onPress={() =>
+                    setSwapToToken(swapToToken === 'XNT' ? 'USDC' : 'XNT')
+                  }>
+                  <Text style={styles.swapTokenSymbol}>
+                    {swapToToken === 'XNT' ? 'XNT' : 'USDC.X'}
+                  </Text>
+                  <FontAwesome name="chevron-down" size={12} color="#888" />
+                </TouchableOpacity>
+                <Text style={styles.tokenBalance}>
+                  Balance: {swapToToken === 'XNT' ? xntBalance : usdcBalance}
+                </Text>
+              </View>
+              <View style={styles.inputContainer}>
+                <Text style={styles.outputAmount}>
+                  {swapToAmount || '0.00'}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.priceInfo}>
+            <Text style={styles.priceLabel}>Price</Text>
+            <Text style={styles.priceValue}>
+              1 {swapFromToken === 'XNT' ? 'XNT' : 'USDC.X'} ={' '}
+              {swapPrice.price.toFixed(6)}{' '}
+              {swapToToken === 'XNT' ? 'XNT' : 'USDC.X'}
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={[
+              styles.swapButton,
+              (!swapFromAmount || parseFloat(swapFromAmount) <= 0) &&
+                styles.swapButtonDisabled,
+            ]}
+            disabled={!swapFromAmount || parseFloat(swapFromAmount) <= 0}>
+            <Text style={styles.swapButtonText}>Swap</Text>
+          </TouchableOpacity>
+
+          <Text style={styles.poolInfo}>
+            Pool: {swapPool?.address.slice(0, 8)}...
+            {swapPool?.address.slice(-4)}
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>No XNT/USDC pool available</Text>
+        </View>
+      )}
     </View>
   );
 
   const renderContent = () => {
     switch (activeTab) {
       case 'swap':
-        return (
-          <View style={styles.swapContainer}>
-            <Text style={styles.swapTitle}>Swap</Text>
-          </View>
-        );
+        return renderSwapScreen();
+      case 'settings':
+        return renderSettingsScreen();
       default:
         return renderWalletScreen();
     }
@@ -628,9 +827,6 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 12,
   },
-  tokenBalance: {
-    alignItems: 'flex-end',
-  },
   tokenBalanceText: {
     color: '#fff',
     fontSize: 16,
@@ -662,24 +858,29 @@ const styles = StyleSheet.create({
   navIconActive: {
     color: '#38B6FF',
   },
-  swapContainer: {
+  screenContainer: {
     flex: 1,
     padding: 16,
   },
-  swapTitle: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  settingsContainer: {
-    flex: 1,
-    padding: 16,
-  },
-  settingsTitle: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
+  screenHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 24,
+  },
+  backButton: {
+    padding: 8,
+  },
+  screenTitle: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  placeholder: {
+    width: 40,
+  },
+  settingsContent: {
+    flex: 1,
   },
   settingItem: {
     backgroundColor: '#1a1a1a',
@@ -696,6 +897,120 @@ const styles = StyleSheet.create({
   },
   dangerText: {
     color: '#FF4444',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#888',
+    marginTop: 12,
+  },
+  swapContent: {
+    marginTop: 24,
+  },
+  swapCard: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 16,
+    padding: 16,
+  },
+  tokenRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  tokenLabel: {
+    color: '#888',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  tokenSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  swapTokenSymbol: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginRight: 4,
+  },
+  tokenBalance: {
+    color: '#888',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  inputContainer: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  amountInput: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '600',
+    textAlign: 'right',
+    minWidth: 120,
+  },
+  outputAmount: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '600',
+  },
+  swapDirectionButton: {
+    alignSelf: 'center',
+    backgroundColor: '#2a2a2a',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 8,
+  },
+  priceInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 16,
+    paddingHorizontal: 8,
+  },
+  priceLabel: {
+    color: '#888',
+    fontSize: 14,
+  },
+  priceValue: {
+    color: '#fff',
+    fontSize: 14,
+  },
+  swapButton: {
+    backgroundColor: '#38B6FF',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 24,
+  },
+  swapButtonDisabled: {
+    backgroundColor: '#333',
+  },
+  swapButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  poolInfo: {
+    color: '#555',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 16,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorText: {
+    color: '#888',
+    fontSize: 16,
   },
 });
 
