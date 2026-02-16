@@ -10,6 +10,7 @@ import {
   TOKEN_2022_PROGRAM,
   TokenMetadata,
 } from './rpc';
+import {getSolanaTokensMetadata} from './jupiter';
 
 // ==================== Types ====================
 export interface PortfolioToken {
@@ -58,29 +59,23 @@ function parseTokenAccountsFromRpc(rpcResult: any): ParsedTokenAccount[] {
 }
 
 // ==================== Metadata Cache ====================
-// Cache metadata during a single fetch cycle to avoid duplicate RPC calls
-const metadataCache: {[key: string]: TokenMetadata} = {};
+// In-memory cache for X1 token metadata during a single fetch cycle
+const x1MetadataCache: {[mint: string]: TokenMetadata} = {};
 
-async function getCachedTokenMetadata(
-  mint: string,
-  rpcUrl: string,
-): Promise<TokenMetadata> {
-  const cacheKey = `${mint}:${rpcUrl}`;
-  if (metadataCache[cacheKey]) {
-    return metadataCache[cacheKey];
+async function getCachedX1TokenMetadata(mint: string): Promise<TokenMetadata> {
+  if (x1MetadataCache[mint]) {
+    return x1MetadataCache[mint];
   }
-  const metadata = await getTokenMetadata(mint, rpcUrl);
-  metadataCache[cacheKey] = metadata;
+  const metadata = await getTokenMetadata(mint, X1_RPC_URL);
+  x1MetadataCache[mint] = metadata;
   return metadata;
 }
 
 // ==================== Build Token From Account ====================
-async function buildPortfolioToken(
+async function buildX1PortfolioToken(
   account: ParsedTokenAccount,
-  network: 'X1' | 'Solana',
-  rpcUrl: string,
 ): Promise<PortfolioToken> {
-  const metadata = await getCachedTokenMetadata(account.mint, rpcUrl);
+  const metadata = await getCachedX1TokenMetadata(account.mint);
   const balanceNum = account.balance / Math.pow(10, account.decimals);
 
   return {
@@ -88,7 +83,25 @@ async function buildPortfolioToken(
     name: metadata.name || account.mint.slice(0, 8) + '...',
     balance: balanceNum.toFixed(Math.min(account.decimals, 4)),
     mint: account.mint,
-    network,
+    network: 'X1',
+    icon_uri: metadata.logo_uri,
+    decimals: account.decimals,
+    rawBalance: balanceNum,
+  };
+}
+
+function buildSolanaPortfolioToken(
+  account: ParsedTokenAccount,
+  metadata: TokenMetadata,
+): PortfolioToken {
+  const balanceNum = account.balance / Math.pow(10, account.decimals);
+
+  return {
+    symbol: metadata.symbol || account.mint.slice(0, 6),
+    name: metadata.name || account.mint.slice(0, 8) + '...',
+    balance: balanceNum.toFixed(Math.min(account.decimals, 4)),
+    mint: account.mint,
+    network: 'Solana',
     icon_uri: metadata.logo_uri,
     decimals: account.decimals,
     rawBalance: balanceNum,
@@ -196,22 +209,30 @@ export async function fetchAllTokens(
     ...parseTokenAccountsFromRpc(solToken2022Result),
   ];
 
-  // 5. Fetch metadata and build PortfolioToken for all discovered SPL tokens
-  const splTokenPromises: Promise<PortfolioToken>[] = [];
-
+  // 5. Fetch metadata for X1 SPL tokens (Token-2022 extensions)
+  const x1TokenPromises: Promise<PortfolioToken>[] = [];
   for (const account of x1TokenAccounts) {
-    splTokenPromises.push(buildPortfolioToken(account, 'X1', X1_RPC_URL));
+    x1TokenPromises.push(buildX1PortfolioToken(account));
   }
-  for (const account of solTokenAccounts) {
-    splTokenPromises.push(
-      buildPortfolioToken(account, 'Solana', SOLANA_RPC_URL),
-    );
+  const x1Tokens = await Promise.all(x1TokenPromises);
+  tokens.push(...x1Tokens);
+
+  // 6. Fetch metadata for Solana SPL tokens (Jupiter API, batched)
+  if (solTokenAccounts.length > 0) {
+    const solMints = solTokenAccounts.map(a => a.mint);
+    const solMetadataMap = await getSolanaTokensMetadata(solMints);
+    for (const account of solTokenAccounts) {
+      const metadata = solMetadataMap[account.mint] || {
+        mint: account.mint,
+        name: null,
+        symbol: null,
+        logo_uri: null,
+      };
+      tokens.push(buildSolanaPortfolioToken(account, metadata));
+    }
   }
 
-  const splTokens = await Promise.all(splTokenPromises);
-  tokens.push(...splTokens);
-
-  // 6. Sort: native tokens first (XNT, SOL), then by rawBalance descending
+  // 7. Sort: native tokens first (XNT, SOL), then by rawBalance descending
   tokens.sort((a, b) => {
     // Native tokens always first
     if (a.mint === null && b.mint !== null) {
