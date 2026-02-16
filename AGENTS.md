@@ -11,6 +11,8 @@ React Native wallet application development.
 - `__tests__/` - Test files
 - `sessions/` - Session memory storage
 - `assets/` - Images and static assets
+- `src/` - Source code modules
+  - `src/xdex.ts` - xDEX swap functionality
 
 ## Development Workflow
 
@@ -241,3 +243,25 @@ Usage:
 2. If exists, ask user to restore
 3. Load `sessions/MEMORY.md` and recent session summaries
 4. Inject historical context into prompt
+
+## xDEX Integration
+
+### RPC Endpoints
+
+- X1 Mainnet: `https://rpc.mainnet.x1.xyz`
+- Solana Mainnet (for SOL balance): `https://api.mainnet-beta.solana.com`
+
+### Important Addresses
+
+- xDEX Program ID: `sEsYH97wqmfnkzHedjNcw3zyJdPvUmsa9AixhS4b4fN`
+- USDC.MINT: `B69chRzqzDCmdB5WYB8NRu5Yv5ZA95ABiZcdzCgGm9Tq`
+- WRAPPED_XNT_MINT: `So11111111111111111111111111111111111111112`
+- NATIVE_XNT_MINT: `So11111111111111111111111111111111111111111`
+- TOKEN_PROGRAM: `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`
+- TOKEN_2022_PROGRAM: `TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`
+- ASSOCIATED_TOKEN_PROGRAM: `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL`
+
+### Token Balance Query
+
+- Native XNT (SOL-like): Use `getBalance` RPC
+- SPL Tokens (USDC.X, WXNT): Use `getTokenAccountsByOwner` RPC
