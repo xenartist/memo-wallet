@@ -46,6 +46,20 @@ Persistent storage of important information, auto-loaded in every session.
 - Portfolio 右上角 Settings 按钮进入 Settings 页面
 - Swap 和 Settings 页面添加返回按钮
 
+### 2026-02-16 后续更新
+
+- 添加代币元数据查询功能 (getTokenMetadata)
+  - 支持 Token 2022 的 metadata 扩展
+  - USDC.X 图标从链上获取
+  - XNT 使用本地图标 (https://app.xdex.xyz/assets/images/tokens/x1.webp)
+- 使用 xDEX 官方 API 获取池信息 (https://api.xdex.xyz/api/xendex/pool/tokens/{token1}/{token2})
+- Swap 页面 UI 优化：
+  - From 区域添加 25%/50%/75%/100% 快捷按钮
+  - From 数值亮色、To 数值灰色（区分输入/输出）
+  - 添加 Slippage 下拉选项 (0.5%, 1%, 2%, 5%, Custom)
+  - 优化纵向间距，节省屏幕空间
+- 修复键盘遮挡问题：使用 ScrollView 包裹 Swap 内容
+
 ## Pending Tasks
 
 - 实现 Swap 交易签名功能 (需要 Seed Vault 签名集成)
