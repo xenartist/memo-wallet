@@ -1062,13 +1062,13 @@ const styles = StyleSheet.create({
   swapCard: {
     backgroundColor: '#1a1a1a',
     borderRadius: 16,
-    padding: 16,
+    padding: 12,
   },
   tokenRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 4,
   },
   tokenLabel: {
     color: '#888',
@@ -1113,8 +1113,8 @@ const styles = StyleSheet.create({
   percentButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 8,
-    marginBottom: 4,
+    marginTop: 4,
+    marginBottom: 2,
   },
   percentButton: {
     backgroundColor: '#333',
@@ -1146,18 +1146,18 @@ const styles = StyleSheet.create({
   swapDirectionButton: {
     alignSelf: 'center',
     backgroundColor: '#2a2a2a',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    marginVertical: 8,
+    marginVertical: 4,
   },
   priceInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 16,
+    marginTop: 8,
     paddingHorizontal: 8,
   },
   priceLabel: {
@@ -1172,7 +1172,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
+    marginTop: 8,
     paddingHorizontal: 8,
   },
   slippageLabel: {
@@ -1242,7 +1242,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 24,
+    marginTop: 16,
   },
   swapButtonDisabled: {
     backgroundColor: '#333',
@@ -1256,7 +1256,7 @@ const styles = StyleSheet.create({
     color: '#555',
     fontSize: 12,
     textAlign: 'center',
-    marginTop: 16,
+    marginTop: 8,
   },
   errorContainer: {
     flex: 1,
