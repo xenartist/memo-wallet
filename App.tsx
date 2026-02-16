@@ -112,8 +112,8 @@ function App(): JSX.Element {
             reserve_0: poolApi.amount1_without_fee,
             reserve_1: poolApi.amount2_without_fee,
             price:
-              poolApi.amount2_without_fee > 0
-                ? poolApi.amount1_without_fee / poolApi.amount2_without_fee
+              poolApi.amount1_without_fee > 0
+                ? poolApi.amount2_without_fee / poolApi.amount1_without_fee
                 : 0,
             token_0_usd_price: null,
             token_1_usd_price: 1,
