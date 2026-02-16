@@ -14,8 +14,17 @@ Persistent storage of important information, auto-loaded in every session.
 - 使用 Seed Vault 进行 Android 钱包连接
 - Debug APK 默认打包 JS bundle
 
+## Technical Stack
+
+- react-native-vector-icons + fontawesome 图标库
+- 底部导航: Portfolio (briefcase) + Swap (exchange)
+
+## Recent Changes (2026-02-16)
+
+- 添加授权状态检测，未授权显示 "Connect Seed Vault"，已授权显示 "Enter Seed Vault"
+- 简化底部导航为 Portfolio + Swap 两个菜单
+- 所有图标统一使用 FontAwesome
+
 ## Pending Tasks
 
-- [ ] 实现连接后的钱包主页 UI
-- [ ] 添加助记词导入功能
-- [ ] 添加创建新钱包功能
+- [ ] 实现 Swap 页面功能
