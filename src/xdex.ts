@@ -49,6 +49,58 @@ export interface TokenMetadata {
   logo_uri: string | null;
 }
 
+export interface PoolInfoFromAPI {
+  pool_address: string;
+  token1_address: string;
+  token2_address: string;
+  token1_symbol: string;
+  token2_symbol: string;
+  token1_logo: string | null;
+  token2_logo: string | null;
+  amount1_without_fee: number;
+  amount2_without_fee: number;
+  mint0Decimals: number;
+  mint1Decimals: number;
+}
+
+const XDEX_API_URL = 'https://api.xdex.xyz/api/xendex';
+
+export async function fetchPoolFromAPI(
+  token1Mint: string,
+  token2Mint: string,
+): Promise<PoolInfoFromAPI | null> {
+  try {
+    const response = await fetch(
+      `${XDEX_API_URL}/pool/tokens/${token1Mint}/${token2Mint}`,
+    );
+    const data = await response.json();
+    if (data.success && data.data) {
+      const pool = data.data;
+      return {
+        pool_address: pool.pool_address,
+        token1_address: pool.token1_address,
+        token2_address: pool.token2_address,
+        token1_symbol: pool.token1_symbol,
+        token2_symbol: pool.token2_symbol,
+        token1_logo: pool.token1_logo
+          ? pool.token1_logo.startsWith('http')
+            ? pool.token1_logo
+            : `https://x1logos.s3.us-east-1.amazonaws.com/${pool.token1_logo}`
+          : null,
+        token2_logo: pool.token2_logo,
+        amount1_without_fee: pool.amount1_without_fee,
+        amount2_without_fee: pool.amount2_without_fee,
+        mint0Decimals: pool.pool_info?.mint0Decimals || 9,
+        mint1Decimals: pool.pool_info?.mint1Decimals || 6,
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Failed to fetch pool from API:', error);
+    return null;
+  }
+}
+
 const KNOWN_TOKEN_METADATA: {[mint: string]: TokenMetadata} = {
   B69chRzqzDCmdB5WYB8NRu5Yv5ZA95ABiZcdzCgGm9Tq: {
     mint: 'B69chRzqzDCmdB5WYB8NRu5Yv5ZA95ABiZcdzCgGm9Tq',

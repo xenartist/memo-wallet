@@ -25,10 +25,9 @@ import {
   rpcCall,
   USDC_MINT,
   WRAPPED_XNT_MINT,
-  PoolInfo,
   PoolPrice,
-  findXNTPools,
-  getPoolPrice,
+  fetchPoolFromAPI,
+  PoolInfoFromAPI,
   getTokenBalance,
   getTokenMetadata,
   TokenMetadata,
@@ -59,7 +58,7 @@ function App(): JSX.Element {
   const [swapFromAmount, setSwapFromAmount] = useState('');
   const [swapToAmount, setSwapToAmount] = useState('');
   const [swapPrice, setSwapPrice] = useState<PoolPrice | null>(null);
-  const [swapPool, setSwapPool] = useState<PoolInfo | null>(null);
+  const [swapPoolApi, setSwapPoolApi] = useState<PoolInfoFromAPI | null>(null);
   const [isLoadingSwap, setIsLoadingSwap] = useState(false);
   const [xntBalance, setXntBalance] = useState<string>('0.00');
   const [usdcBalance, setUsdcBalance] = useState<string>('0.00');
@@ -90,10 +89,10 @@ function App(): JSX.Element {
       try {
         setIsLoadingSwap(true);
 
-        const [nativeXntBal, pools, usdcBal, usdcMeta] = await Promise.all([
+        const [nativeXntBal, usdcBal, poolApi, usdcMeta] = await Promise.all([
           rpcCall('getBalance', [publicKey]),
-          findXNTPools(),
           getTokenBalance(publicKey, USDC_MINT),
+          fetchPoolFromAPI(WRAPPED_XNT_MINT, USDC_MINT),
           getTokenMetadata(USDC_MINT),
         ]);
 
@@ -103,10 +102,22 @@ function App(): JSX.Element {
         setXntBalance((xntBalanceLamports / 1e9).toFixed(4));
         setUsdcBalance((usdcBal / 1e6).toFixed(4));
 
-        if (pools.length > 0) {
-          const pool = pools[0];
-          setSwapPool(pool);
-          const price = await getPoolPrice(pool);
+        if (poolApi) {
+          setSwapPoolApi(poolApi);
+
+          const price: PoolPrice = {
+            pool_address: poolApi.pool_address,
+            token_0_mint: poolApi.token1_address,
+            token_1_mint: poolApi.token2_address,
+            reserve_0: poolApi.amount1_without_fee,
+            reserve_1: poolApi.amount2_without_fee,
+            price:
+              poolApi.amount2_without_fee > 0
+                ? poolApi.amount1_without_fee / poolApi.amount2_without_fee
+                : 0,
+            token_0_usd_price: null,
+            token_1_usd_price: 1,
+          };
           setSwapPrice(price);
         }
       } catch (error) {
@@ -222,7 +233,7 @@ function App(): JSX.Element {
 
   const calculateSwapOutput = useCallback(
     (amount: string) => {
-      if (!amount || !swapPrice || !swapPool) {
+      if (!amount || !swapPrice || !swapPoolApi) {
         setSwapToAmount('');
         return;
       }
@@ -245,7 +256,7 @@ function App(): JSX.Element {
 
       setSwapToAmount(output.toFixed(6));
     },
-    [swapPrice, swapPool, swapFromToken],
+    [swapPrice, swapPoolApi, swapFromToken],
   );
 
   const handleFromAmountChange = (text: string) => {
@@ -520,7 +531,9 @@ function App(): JSX.Element {
                   }>
                   {swapFromToken === 'XNT' ? (
                     <Image
-                      source={require('./assets/image/xnt-token.jpeg')}
+                      source={{
+                        uri: 'https://app.xdex.xyz/assets/images/tokens/x1.webp',
+                      }}
                       style={styles.swapTokenIcon}
                     />
                   ) : swapFromToken === 'USDC' && usdcMetadata?.logo_uri ? (
@@ -590,7 +603,9 @@ function App(): JSX.Element {
                   }>
                   {swapToToken === 'XNT' ? (
                     <Image
-                      source={require('./assets/image/xnt-token.jpeg')}
+                      source={{
+                        uri: 'https://app.xdex.xyz/assets/images/tokens/x1.webp',
+                      }}
                       style={styles.swapTokenIcon}
                     />
                   ) : swapToToken === 'USDC' && usdcMetadata?.logo_uri ? (
@@ -640,8 +655,8 @@ function App(): JSX.Element {
           </TouchableOpacity>
 
           <Text style={styles.poolInfo}>
-            Pool: {swapPool?.address.slice(0, 8)}...
-            {swapPool?.address.slice(-4)}
+            Pool: {swapPoolApi?.pool_address.slice(0, 8)}...
+            {swapPoolApi?.pool_address.slice(-4)}
           </Text>
         </View>
       ) : (
