@@ -63,6 +63,9 @@ function App(): JSX.Element {
   const [xntBalance, setXntBalance] = useState<string>('0.00');
   const [usdcBalance, setUsdcBalance] = useState<string>('0.00');
   const [usdcMetadata, setUsdcMetadata] = useState<TokenMetadata | null>(null);
+  const [slippage, setSlippage] = useState<number>(0.5);
+  const [showSlippageModal, setShowSlippageModal] = useState(false);
+  const [customSlippage, setCustomSlippage] = useState<string>('');
 
   useEffect(() => {
     const initAuth = async () => {
@@ -644,6 +647,61 @@ function App(): JSX.Element {
             </Text>
           </View>
 
+          <View style={styles.slippageRow}>
+            <Text style={styles.slippageLabel}>Slippage</Text>
+            <TouchableOpacity
+              style={styles.slippageButton}
+              onPress={() => setShowSlippageModal(true)}>
+              <Text style={styles.slippageButtonText}>
+                {slippage < 0 ? `${customSlippage}%` : `${slippage}%`}
+              </Text>
+              <FontAwesome name="chevron-down" size={12} color="#888" />
+            </TouchableOpacity>
+          </View>
+
+          {showSlippageModal && (
+            <View style={styles.slippageModal}>
+              {[0.5, 1, 2, 5].map(value => (
+                <TouchableOpacity
+                  key={value}
+                  style={[
+                    styles.slippageOption,
+                    slippage === value && styles.slippageOptionActive,
+                  ]}
+                  onPress={() => {
+                    setSlippage(value);
+                    setShowSlippageModal(false);
+                  }}>
+                  <Text
+                    style={[
+                      styles.slippageOptionText,
+                      slippage === value && styles.slippageOptionTextActive,
+                    ]}>
+                    {value}%
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              <View style={styles.slippageCustomRow}>
+                <Text style={styles.slippageCustomLabel}>Custom:</Text>
+                <TextInput
+                  style={styles.slippageCustomInput}
+                  value={customSlippage}
+                  onChangeText={text => {
+                    const num = parseFloat(text);
+                    if (!isNaN(num) && num >= 0 && num <= 100) {
+                      setCustomSlippage(text);
+                      setSlippage(-1);
+                    }
+                  }}
+                  placeholder="0"
+                  placeholderTextColor="#555"
+                  keyboardType="decimal-pad"
+                />
+                <Text style={styles.slippageCustomLabel}>%</Text>
+              </View>
+            </View>
+          )}
+
           <TouchableOpacity
             style={[
               styles.swapButton,
@@ -1108,6 +1166,75 @@ const styles = StyleSheet.create({
   priceValue: {
     color: '#fff',
     fontSize: 14,
+  },
+  slippageRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingHorizontal: 8,
+  },
+  slippageLabel: {
+    color: '#888',
+    fontSize: 14,
+  },
+  slippageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#333',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  slippageButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    marginRight: 4,
+  },
+  slippageModal: {
+    backgroundColor: '#222',
+    borderRadius: 8,
+    marginTop: 8,
+    padding: 8,
+  },
+  slippageOption: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  slippageOptionActive: {
+    backgroundColor: '#38B6FF',
+  },
+  slippageOptionText: {
+    color: '#fff',
+    fontSize: 16,
+  },
+  slippageOptionTextActive: {
+    color: '#000',
+    fontWeight: 'bold',
+  },
+  slippageCustomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#444',
+  },
+  slippageCustomLabel: {
+    color: '#888',
+    fontSize: 14,
+    marginRight: 8,
+  },
+  slippageCustomInput: {
+    backgroundColor: '#333',
+    color: '#fff',
+    fontSize: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    width: 60,
+    textAlign: 'center',
   },
   swapButton: {
     backgroundColor: '#38B6FF',
