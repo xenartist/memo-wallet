@@ -57,7 +57,7 @@ function App(): JSX.Element {
   const [currentAuthToken, setCurrentAuthToken] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
-  const [activeTab, setActiveTab] = useState('home');
+  const [activeTab, setActiveTab] = useState('portfolio');
   const [tokens, setTokens] = useState<TokenInfo[]>([
     {symbol: 'XNT', name: 'XNT', balance: '0.00'},
     {symbol: 'SOL', name: 'Solana', balance: '0.00'},
@@ -333,29 +333,25 @@ function App(): JSX.Element {
     <View style={styles.bottomNav}>
       <TouchableOpacity
         style={styles.navItem}
-        onPress={() => setActiveTab('home')}>
+        onPress={() => setActiveTab('portfolio')}>
         <Text
           style={[
             styles.navIcon,
-            activeTab === 'home' && styles.navIconActive,
+            activeTab === 'portfolio' && styles.navIconActive,
           ]}>
-          Home
+          Portfolio
         </Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={styles.navItem}
-        onPress={() => setActiveTab('send')}>
-        <Text style={styles.navIcon}>Send</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={styles.navItem}
-        onPress={() => setActiveTab('receive')}>
-        <Text style={styles.navIcon}>Receive</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={styles.navItem}
-        onPress={() => setActiveTab('settings')}>
-        <Text style={styles.navIcon}>Settings</Text>
+        onPress={() => setActiveTab('swap')}>
+        <Text
+          style={[
+            styles.navIcon,
+            activeTab === 'swap' && styles.navIconActive,
+          ]}>
+          Swap
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -383,8 +379,12 @@ function App(): JSX.Element {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'settings':
-        return renderSettingsScreen();
+      case 'swap':
+        return (
+          <View style={styles.swapContainer}>
+            <Text style={styles.swapTitle}>Swap</Text>
+          </View>
+        );
       default:
         return renderWalletScreen();
     }
@@ -640,6 +640,15 @@ const styles = StyleSheet.create({
   },
   navIconActive: {
     color: '#38B6FF',
+  },
+  swapContainer: {
+    flex: 1,
+    padding: 16,
+  },
+  swapTitle: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
   },
   settingsContainer: {
     flex: 1,
