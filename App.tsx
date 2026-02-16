@@ -554,6 +554,26 @@ function App(): JSX.Element {
               </View>
             </View>
 
+            <View style={styles.percentButtons}>
+              {[25, 50, 75, 100].map(percent => (
+                <TouchableOpacity
+                  key={percent}
+                  style={styles.percentButton}
+                  onPress={() => {
+                    const tokenBalance =
+                      swapFromToken === 'XNT' ? xntBalance : usdcBalance;
+                    if (parseFloat(tokenBalance) > 0) {
+                      const amount = (parseFloat(tokenBalance) * percent) / 100;
+                      const decimals = swapFromToken === 'XNT' ? 4 : 2;
+                      setSwapFromAmount(amount.toFixed(decimals));
+                      calculateSwapOutput(amount.toFixed(decimals));
+                    }
+                  }}>
+                  <Text style={styles.percentButtonText}>{percent}%</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
             <TouchableOpacity
               style={styles.swapDirectionButton}
               onPress={handleSwapTokens}>
@@ -996,6 +1016,23 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 12,
     marginTop: 4,
+  },
+  percentButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  percentButton: {
+    backgroundColor: '#333',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 4,
+  },
+  percentButtonText: {
+    color: '#38B6FF',
+    fontSize: 12,
+    fontWeight: '600',
   },
   inputContainer: {
     flex: 1,
