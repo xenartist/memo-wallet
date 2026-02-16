@@ -666,9 +666,17 @@ function App(): JSX.Element {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#000" />
-      <View style={styles.content}>
+      <View style={styles.contentInner}>
         {!connected ? (
           renderLoginScreen()
+        ) : activeTab === 'swap' ? (
+          <ScrollView
+            style={styles.swapScrollView}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.swapScrollContent}>
+            {renderContent()}
+            {renderBottomNav()}
+          </ScrollView>
         ) : (
           <View style={styles.walletWrapper}>
             {renderContent()}
@@ -687,6 +695,16 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  contentInner: {
+    flex: 1,
+  },
+  swapScrollView: {
+    flex: 1,
+  },
+  swapScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'space-between',
   },
   loginContainer: {
     flex: 1,
@@ -731,6 +749,7 @@ const styles = StyleSheet.create({
   },
   walletWrapper: {
     flex: 1,
+    justifyContent: 'space-between',
   },
   walletContainer: {
     flex: 1,
