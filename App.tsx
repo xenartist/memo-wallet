@@ -693,6 +693,7 @@ function App(): JSX.Element {
                       setSlippage(-1);
                     }
                   }}
+                  onEndEditing={() => setShowSlippageModal(false)}
                   placeholder="0"
                   placeholderTextColor="#555"
                   keyboardType="decimal-pad"
