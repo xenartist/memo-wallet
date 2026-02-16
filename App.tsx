@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useState, useEffect} from 'react';
 import {
   SafeAreaView,
   StyleSheet,
@@ -56,11 +56,29 @@ function App(): JSX.Element {
   const [balance, setBalance] = useState<string>('');
   const [currentAuthToken, setCurrentAuthToken] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [activeTab, setActiveTab] = useState('home');
   const [tokens, setTokens] = useState<TokenInfo[]>([
     {symbol: 'XNT', name: 'XNT', balance: '0.00'},
     {symbol: 'SOL', name: 'Solana', balance: '0.00'},
   ]);
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        const isAvailable = await SeedVault.isSeedVaultAvailable(false);
+        if (!isAvailable) {
+          setIsAuthorized(false);
+          return;
+        }
+        const authorizedSeeds = await SeedVault.getAuthorizedSeeds();
+        setIsAuthorized(authorizedSeeds.length > 0);
+      } catch (error) {
+        setIsAuthorized(false);
+      }
+    };
+    initAuth();
+  }, []);
 
   const checkAndRequestPermission = async (): Promise<boolean> => {
     if (Platform.OS !== 'android') {
@@ -159,6 +177,36 @@ function App(): JSX.Element {
     setPublicKey('');
     setBalance('');
     setCurrentAuthToken(null);
+    setIsAuthorized(false);
+  };
+
+  const checkAuthorization = async (): Promise<boolean> => {
+    try {
+      const hasPermission = await checkAndRequestPermission();
+      if (!hasPermission) {
+        return false;
+      }
+      const authorizedSeeds = await SeedVault.getAuthorizedSeeds();
+      const authorized = authorizedSeeds.length > 0;
+      setIsAuthorized(authorized);
+      return authorized;
+    } catch (error) {
+      setIsAuthorized(false);
+      return false;
+    }
+  };
+
+  const handleLoginPress = async () => {
+    const authorized = await checkAuthorization();
+    if (authorized) {
+      await connectSeedVault();
+    } else {
+      const result = await SeedVault.authorizeNewSeed();
+      if (result) {
+        setIsAuthorized(true);
+        await getAccountInfo(result.authToken);
+      }
+    }
   };
 
   const copyAddress = () => {
@@ -185,12 +233,14 @@ function App(): JSX.Element {
 
       <TouchableOpacity
         style={styles.button}
-        onPress={connectSeedVault}
+        onPress={handleLoginPress}
         disabled={isLoading}>
         {isLoading ? (
           <ActivityIndicator color="#fff" />
         ) : (
-          <Text style={styles.buttonText}>Connect Seed Vault</Text>
+          <Text style={styles.buttonText}>
+            {isAuthorized ? 'Enter Seed Vault' : 'Connect Seed Vault'}
+          </Text>
         )}
       </TouchableOpacity>
 
@@ -396,7 +446,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 48,
     borderRadius: 12,
     marginBottom: 16,
-    minWidth: 200,
+    width: 240,
     alignItems: 'center',
     minHeight: 56,
   },
@@ -404,6 +454,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
+    flexWrap: 'nowrap',
   },
   walletWrapper: {
     flex: 1,

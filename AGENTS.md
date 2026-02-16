@@ -54,7 +54,8 @@ APK 位置: `android/app/build/outputs/apk/debug/app-debug.apk`
 安装到设备:
 
 ```bash
-adb install android/app/build/outputs/apk/debug/app-debug.apk
+# 设备: SM02G40619145272
+adb -s SM02G40619145272 install android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
 配置说明: 在 `android/app/build.gradle` 中设置 `debuggableVariants = []` 使 debug build 也打包 JS。
