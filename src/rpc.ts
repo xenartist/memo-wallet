@@ -123,6 +123,52 @@ export function readU64(data: number[], offset: number): number {
   return result;
 }
 
+// ==================== xDEX API ====================
+export interface XDEXToken {
+  mint: string;
+  amount: number;
+  decimals: number;
+  ui_amount: number;
+  symbol: string;
+  name: string;
+  imageUrl: string;
+  is_lp_token: boolean;
+}
+
+interface XDEXApiResponse {
+  success: boolean;
+  data: {
+    wallet: string;
+    network: string;
+    tokens: XDEXToken[];
+  };
+}
+
+export type XDENetwork = 'X1 Mainnet' | 'Solana Mainnet';
+
+const XDEX_API_BASE = 'https://api.xdex.xyz/api/xendex/wallet/tokens';
+
+export async function fetchXDEXWalletTokens(
+  walletAddress: string,
+  network: XDENetwork,
+): Promise<XDEXToken[]> {
+  const url = `${XDEX_API_BASE}?wallet_address=${walletAddress}&network=${encodeURIComponent(
+    network,
+  )}`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`xDEX API error: ${response.status}`);
+  }
+
+  const data: XDEXApiResponse = await response.json();
+  if (!data.success) {
+    throw new Error('xDEX API returned unsuccessful response');
+  }
+
+  return data.data.tokens;
+}
+
 // ==================== Token Metadata ====================
 export async function getTokenMetadata(
   mintAddress: string,

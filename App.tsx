@@ -53,8 +53,6 @@ function App(): JSX.Element {
       icon_uri: 'https://app.xdex.xyz/assets/images/tokens/x1.webp',
       decimals: 9,
       rawBalance: 0,
-      usdPrice: null,
-      usdValue: null,
     },
     {
       symbol: 'SOL',
@@ -65,8 +63,6 @@ function App(): JSX.Element {
       icon_uri: null,
       decimals: 9,
       rawBalance: 0,
-      usdPrice: null,
-      usdValue: null,
     },
   ]);
   const [refreshing, setRefreshing] = useState(false);
@@ -471,21 +467,8 @@ function App(): JSX.Element {
               <Text style={styles.tokenName}>{token.name}</Text>
             </View>
             <View style={styles.tokenBalance}>
-              {token.usdValue !== null ? (
-                <>
-                  <Text style={styles.tokenBalanceText}>
-                    $
-                    {token.usdValue < 0.01
-                      ? '<0.01'
-                      : token.usdValue.toFixed(2)}
-                  </Text>
-                  <Text style={styles.tokenBalanceUsd}>
-                    {token.balance} {token.symbol}
-                  </Text>
-                </>
-              ) : (
-                <Text style={styles.tokenBalanceText}>{token.balance}</Text>
-              )}
+              <Text style={styles.tokenBalanceText}>{token.balance}</Text>
+              <Text style={styles.tokenBalanceUsd}>{token.symbol}</Text>
             </View>
           </View>
         ))}
