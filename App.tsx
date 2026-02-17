@@ -72,6 +72,7 @@ function App(): JSX.Element {
   const [swapToToken, setSwapToToken] = useState<SwapToken | null>(null);
   const [swapFromAmount, setSwapFromAmount] = useState('');
   const [swapToAmount, setSwapToAmount] = useState('');
+  const [swapQuoteRate, setSwapQuoteRate] = useState<number | null>(null); // tokenOutAmount per tokenIn
   const [isLoadingSwapTokens, setIsLoadingSwapTokens] = useState(false);
   const [isLoadingQuote, setIsLoadingQuote] = useState(false);
   const [isExecutingSwap, setIsExecutingSwap] = useState(false);
@@ -236,11 +237,42 @@ function App(): JSX.Element {
     setIsAuthorized(false);
   };
 
-  // Fetch quote whenever from/to token or amount changes (debounced)
-  const fetchQuote = useCallback(
-    async (amount: string) => {
+  // Fetch quote rate (exchange ratio) from API - called when tokens change or periodically
+  const fetchQuoteRate = useCallback(async () => {
+    if (!swapFromToken || !swapToToken) {
+      return;
+    }
+    setIsLoadingQuote(true);
+    try {
+      // Use a fixed amount (1) to get the exchange rate
+      const result = await fetchSwapQuote({
+        network: swapNetwork,
+        tokenIn: swapFromToken.apiMint,
+        tokenOut: swapToToken.apiMint,
+        tokenInAmount: 1,
+        isExactAmountIn: true,
+      });
+      // Store the rate (output per 1 input)
+      setSwapQuoteRate(result.tokenOutAmount);
+      // If user has entered an amount, recalculate locally
+      if (swapFromAmount && parseFloat(swapFromAmount) > 0) {
+        const decimals = Math.min(swapToToken.decimals, 6);
+        const output = result.tokenOutAmount * parseFloat(swapFromAmount);
+        setSwapToAmount(output.toFixed(decimals));
+      }
+    } catch (err) {
+      console.error('[App] Quote rate error:', err);
+      setSwapQuoteRate(null);
+    } finally {
+      setIsLoadingQuote(false);
+    }
+  }, [swapFromToken, swapToToken, swapNetwork, swapFromAmount]);
+
+  // Calculate output amount locally based on existing quote rate
+  const calculateOutputAmount = useCallback(
+    (amount: string) => {
       if (
-        !swapFromToken ||
+        !swapQuoteRate ||
         !swapToToken ||
         !amount ||
         parseFloat(amount) <= 0
@@ -248,30 +280,33 @@ function App(): JSX.Element {
         setSwapToAmount('');
         return;
       }
-      setIsLoadingQuote(true);
-      try {
-        const result = await fetchSwapQuote({
-          network: swapNetwork,
-          tokenIn: swapFromToken.apiMint,
-          tokenOut: swapToToken.apiMint,
-          tokenInAmount: parseFloat(amount),
-          isExactAmountIn: true,
-        });
-        const decimals = Math.min(swapToToken.decimals, 6);
-        setSwapToAmount(result.tokenOutAmount.toFixed(decimals));
-      } catch (err) {
-        console.error('[App] Quote error:', err);
-        setSwapToAmount('');
-      } finally {
-        setIsLoadingQuote(false);
-      }
+      const decimals = Math.min(swapToToken.decimals, 6);
+      const output = swapQuoteRate * parseFloat(amount);
+      setSwapToAmount(output.toFixed(decimals));
     },
-    [swapFromToken, swapToToken, swapNetwork],
+    [swapQuoteRate, swapToToken],
   );
+
+  // Fetch quote rate when tokens change, and set up periodic refresh (every 30 seconds)
+  useEffect(() => {
+    if (!swapFromToken || !swapToToken) {
+      return;
+    }
+
+    // Fetch immediately when tokens change
+    fetchQuoteRate();
+
+    // Set up 30-second interval to refresh quote
+    const intervalId = setInterval(() => {
+      fetchQuoteRate();
+    }, 30000);
+
+    return () => clearInterval(intervalId);
+  }, [swapFromToken, swapToToken, swapNetwork, fetchQuoteRate]);
 
   const handleFromAmountChange = (text: string) => {
     setSwapFromAmount(text);
-    fetchQuote(text);
+    calculateOutputAmount(text);
   };
 
   const handleSwapDirection = () => {
@@ -769,18 +804,8 @@ function App(): JSX.Element {
             <FontAwesome name="arrow-left" size={20} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.screenTitle}>Swap</Text>
-          {/* Network badge */}
-          <View
-            style={[
-              styles.networkBadgePill,
-              swapNetwork === 'X1 Mainnet'
-                ? styles.networkBadgePillX1
-                : styles.networkBadgePillSol,
-            ]}>
-            <Text style={styles.networkBadgePillText}>
-              {swapNetwork === 'X1 Mainnet' ? 'X1' : 'Solana'}
-            </Text>
-          </View>
+          {/* Spacer to balance the header */}
+          <View style={{width: 50}} />
         </View>
 
         {isLoadingSwapTokens ? (
@@ -790,6 +815,29 @@ function App(): JSX.Element {
           </View>
         ) : (
           <View style={styles.swapContent}>
+            {/* ── Header with Network & Slippage ── */}
+            <View style={styles.swapHeader}>
+              <View
+                style={[
+                  styles.networkBadgePill,
+                  swapNetwork === 'X1 Mainnet'
+                    ? styles.networkBadgePillX1
+                    : styles.networkBadgePillSol,
+                ]}>
+                <Text style={styles.networkBadgePillText}>
+                  {swapNetwork === 'X1 Mainnet' ? 'X1' : 'SOL'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.slippageButtonLarge}
+                onPress={() => setShowSlippageModal(!showSlippageModal)}>
+                <Text style={styles.slippageButtonLargeText}>
+                  Slippage: {currentSlippage}%
+                </Text>
+                <FontAwesome name="gear" size={16} color="#888" />
+              </TouchableOpacity>
+            </View>
+
             {/* ── From ── */}
             <View style={styles.swapCard}>
               <Text style={styles.tokenLabel}>From</Text>
@@ -838,7 +886,7 @@ function App(): JSX.Element {
                       const dec = Math.min(swapFromToken.decimals, 6);
                       const str = amt.toFixed(dec);
                       setSwapFromAmount(str);
-                      fetchQuote(str);
+                      calculateOutputAmount(str);
                     }}>
                     <Text style={styles.percentButtonText}>{pct}%</Text>
                   </TouchableOpacity>
@@ -886,19 +934,15 @@ function App(): JSX.Element {
               </Text>
             </View>
 
-            {/* ── Slippage ── */}
-            <View style={styles.slippageRow}>
-              <Text style={styles.slippageLabel}>Slippage</Text>
-              <TouchableOpacity
-                style={styles.slippageButton}
-                onPress={() => setShowSlippageModal(!showSlippageModal)}>
-                <Text style={styles.slippageButtonText}>
-                  {currentSlippage}%
-                </Text>
-                <FontAwesome name="chevron-down" size={12} color="#888" />
-              </TouchableOpacity>
-            </View>
+            {/* ── Exchange Rate ── */}
+            {swapFromToken && swapToToken && swapQuoteRate && (
+              <Text style={styles.exchangeRateText}>
+                1 {swapFromToken.symbol} = {swapQuoteRate.toFixed(4)}{' '}
+                {swapToToken.symbol}
+              </Text>
+            )}
 
+            {/* ── Slippage Modal (appears when clicked) ── */}
             {showSlippageModal && (
               <View style={styles.slippageModal}>
                 {[0.5, 1, 2, 5].map(value => (
@@ -1331,6 +1375,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 4,
   },
+  tokenLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  slippageButtonSmall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  slippageButtonSmallText: {
+    color: '#888',
+    fontSize: 12,
+  },
   tokenSelector: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1451,7 +1510,7 @@ const styles = StyleSheet.create({
   slippageModal: {
     backgroundColor: '#222',
     borderRadius: 8,
-    marginTop: 8,
+    marginBottom: 8,
     padding: 8,
   },
   slippageOption: {
@@ -1482,6 +1541,16 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 14,
     marginRight: 8,
+  },
+  exchangeRateText: {
+    color: '#888',
+    fontSize: 12,
+  },
+  rateSlippageRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   slippageCustomInput: {
     backgroundColor: '#333',
@@ -1613,6 +1682,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+  },
+  swapHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  slippageButtonLarge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#333',
+    borderRadius: 8,
+  },
+  slippageButtonLargeText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
   },
   networkBadgePillX1: {
     backgroundColor: '#38B6FF22',

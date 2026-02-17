@@ -368,9 +368,11 @@ export async function fetchSwapQuote(
 
   const d = data.data ?? data;
   return {
-    tokenInAmount: d.token_in_amount ?? d.tokenInAmount ?? tokenInAmount,
-    tokenOutAmount: d.token_out_amount ?? d.tokenOutAmount ?? 0,
-    priceImpact: d.price_impact ?? d.priceImpact ?? null,
+    tokenInAmount:
+      d.inputAmount ?? d.token_in_amount ?? d.tokenInAmount ?? tokenInAmount,
+    tokenOutAmount:
+      d.outputAmount ?? d.token_out_amount ?? d.tokenOutAmount ?? 0,
+    priceImpact: d.priceImpactPct ?? d.price_impact ?? d.priceImpact ?? null,
     minAmountOut: d.minimum_amount_out ?? d.minAmountOut ?? null,
     raw: d,
   };
