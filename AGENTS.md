@@ -58,8 +58,11 @@ API 端点: `https://api.xdex.xyz/api/xendex/wallet/tokens?wallet_address={addr}
 所有开发调试流程：
 
 1. 修改代码
-2. 编译 APK 并推送到手机
-3. 在手机上查看效果
+2. 运行 `npm run lint` 确保代码无错误
+3. 编译 APK 并推送到手机
+4. 在手机上查看效果
+
+**自动化**: 每次代码修改调整后，都必须自动编译打包并推送到手机上进行测试。
 
 ## Development Commands
 
