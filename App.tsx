@@ -527,9 +527,6 @@ function App(): JSX.Element {
         <View style={styles.placeholder} />
       </View>
       <View style={styles.settingsContent}>
-        <TouchableOpacity style={styles.settingItem} onPress={disconnect}>
-          <Text style={styles.settingText}>Disconnect Wallet</Text>
-        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.settingItem, styles.dangerItem]}
           onPress={() => {
@@ -853,7 +850,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 48,
     borderRadius: 12,
     marginBottom: 16,
-    width: 240,
+    width: 280,
     alignItems: 'center',
     minHeight: 56,
   },
