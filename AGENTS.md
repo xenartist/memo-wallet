@@ -34,20 +34,22 @@ All RPC utility functions should support an optional `rpcUrl` parameter to work 
 
 ### Token Discovery
 
-When discovering SPL tokens in a wallet, query both TOKEN_PROGRAM and TOKEN_2022_PROGRAM:
+使用 xDEX API 一次性获取钱包所有代币信息：
 
 ```typescript
-rpcCall('getTokenAccountsByOwner', [
-  wallet,
-  {programId: TOKEN_PROGRAM},
-  {encoding: 'jsonParsed'},
-]);
-rpcCall('getTokenAccountsByOwner', [
-  wallet,
-  {programId: TOKEN_2022_PROGRAM},
-  {encoding: 'jsonParsed'},
-]);
+// src/rpc.ts
+import {fetchXDEXWalletTokens} from './rpc';
+
+const tokens = await fetchXDEXWalletTokens(walletAddress, 'X1 Mainnet');
+const solTokens = await fetchXDEXWalletTokens(walletAddress, 'Solana Mainnet');
+
+// 过滤 LP 代币
+const splTokens = tokens.filter(t => !t.is_lp_token);
 ```
+
+API 端点: `https://api.xdex.xyz/api/xendex/wallet/tokens?wallet_address={addr}&network=X1%20Mainnet`
+
+返回字段: mint, amount, decimals, ui_amount, symbol, name, imageUrl, is_lp_token
 
 ## Development Workflow
 
@@ -298,5 +300,9 @@ Usage:
 
 ### Token Balance Query
 
-- Native XNT (SOL-like): Use `getBalance` RPC
-- SPL Tokens (USDC.X, WXNT): Use `getTokenAccountsByOwner` RPC
+使用 xDEX API 查询代币余额：
+
+- X1: `fetchXDEXWalletTokens(wallet, 'X1 Mainnet')`
+- Solana: `fetchXDEXWalletTokens(wallet, 'Solana Mainnet')`
+
+原生代币识别: mint 为 `111111111111111111111111111111111111111111`

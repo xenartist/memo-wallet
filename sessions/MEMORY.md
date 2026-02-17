@@ -33,8 +33,9 @@ Persistent storage of important information, auto-loaded in every session.
 
 ## 代币余额查询
 
-- 原生 XNT: 使用 getBalance RPC
-- SPL Token (USDC.X, WXNT): 使用 getTokenAccountsByOwner
+- 使用 xDEX API: `fetchXDEXWalletTokens(wallet, 'X1 Mainnet' | 'Solana Mainnet')`
+- 过滤 LP 代币: `is_lp_token === true`
+- 原生代币 mint: `111111111111111111111111111111111111111111`
 
 ## 文件结构
 
@@ -47,10 +48,10 @@ src/
 
 ## 代币发现逻辑
 
-- 使用 getTokenAccountsByOwner 查询钱包所有 SPL 代币
-- 需要分别查询 TOKEN_PROGRAM 和 TOKEN_2022_PROGRAM 两个 programId
-- 需要分别在 X1 和 Solana 两条链上查询
-- 图标获取: 链上 metadata -> 本地图片 -> 首字母占位符
+- 使用 xDEX API 一次性获取钱包所有代币信息
+- 分别调用 X1 Mainnet 和 Solana Mainnet 网络
+- 过滤 `is_lp_token === true` 的 LP 代币
+- 图标从 API 返回的 imageUrl 获取
 
 ## Recent Changes (2026-02-16)
 
@@ -84,19 +85,22 @@ src/
 
 ## Recent Changes (2026-02-17)
 
-### 代码重构：按功能拆分文件
+### xDEX API 集成：简化代币查询
 
-- `src/rpc.ts` (新建): RPC 端点、常量、编码工具、getTokenMetadata
-- `src/portfolio.ts` (新建): fetchAllTokens() 并行查询 X1+Solana 6 个 RPC，自动发现钱包所有 SPL 代币
-- `src/swap.ts` (重构自 xdex.ts): 保留 swap 相关逻辑
+- 使用 xDEX API 替代原有 6 次 RPC 调用
+- API: `https://api.xdex.xyz/api/xendex/wallet/tokens?wallet_address={addr}&network=X1%20Mainnet`
+- 只需 2 次 HTTP 调用即可获取 X1 + Solana 两条链的所有代币
+- 过滤 LP 代币: `is_lp_token === true`
+- 原生代币 mint: `111111111111111111111111111111111111111111`
+- 移除 Jupiter USD 价格查询，简化为只显示代币数量
 
-### Portfolio 资产显示扩展
+### 代码变更
 
-- 支持显示钱包在 X1 和 Solana 两条链上持有的所有 SPL 代币
-- 代币图标: 链上 metadata URI -> 本地图片 -> 首字母占位符
-- 排序: 原生代币 (XNT, SOL) 优先，SPL 代币按余额降序
+- `src/rpc.ts`: 新增 `fetchXDEXWalletTokens()`, `XDEXToken`, `XDENetwork` 类型
+- `src/portfolio.ts`: 完全重构，使用 xDEX API
+- `PortfolioToken` 接口简化: 移除 `usdPrice`, `usdValue`
 
 ### 重要规则
 
 - App.tsx 仅负责 UI 和状态管理，业务逻辑放在 src/ 模块
-- 所有 RPC 函数支持 rpcUrl 参数实现多链
+- 优先使用 xDEX API 进行代币发现
