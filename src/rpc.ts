@@ -4,6 +4,12 @@
 export const X1_RPC_URL = 'https://rpc.mainnet.x1.xyz';
 export const SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com';
 
+export type SwapNetwork = 'X1 Mainnet' | 'Solana Mainnet';
+
+export function rpcUrlForNetwork(network: SwapNetwork): string {
+  return network === 'Solana Mainnet' ? SOLANA_RPC_URL : X1_RPC_URL;
+}
+
 // ==================== Mint Addresses ====================
 export const USDC_MINT = 'B69chRzqzDCmdB5WYB8NRu5Yv5ZA95ABiZcdzCgGm9Tq';
 export const NATIVE_XNT_MINT = 'So11111111111111111111111111111111111111111';
@@ -167,6 +173,158 @@ export async function fetchXDEXWalletTokens(
   }
 
   return data.data.tokens;
+}
+
+// ==================== Base58 Codec ====================
+const BASE58_CHARS =
+  '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+export function base58Decode(str: string): Uint8Array {
+  let num = BigInt(0);
+  for (const ch of str) {
+    const idx = BASE58_CHARS.indexOf(ch);
+    if (idx < 0) {
+      throw new Error(`Invalid base58 char: ${ch}`);
+    }
+    num = num * BigInt(58) + BigInt(idx);
+  }
+  // Count leading '1's → leading zero bytes
+  let leadingZeros = 0;
+  for (const ch of str) {
+    if (ch === '1') {
+      leadingZeros++;
+    } else {
+      break;
+    }
+  }
+  // Convert bigint to bytes
+  const bytes: number[] = [];
+  while (num > BigInt(0)) {
+    bytes.unshift(Number(num % BigInt(256)));
+    num = num / BigInt(256);
+  }
+  const result = new Uint8Array(leadingZeros + bytes.length);
+  bytes.forEach((b, i) => {
+    result[leadingZeros + i] = b;
+  });
+  return result;
+}
+
+export function base58Encode(bytes: Uint8Array): string {
+  let num = BigInt(0);
+  for (const b of bytes) {
+    num = num * BigInt(256) + BigInt(b);
+  }
+  let result = '';
+  while (num > BigInt(0)) {
+    const rem = Number(num % BigInt(58));
+    result = BASE58_CHARS[rem] + result;
+    num = num / BigInt(58);
+  }
+  for (const b of bytes) {
+    if (b === 0) {
+      result = '1' + result;
+    } else {
+      break;
+    }
+  }
+  return result;
+}
+
+export function base64Encode(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+export function base64DecodeToUint8Array(base64String: string): Uint8Array {
+  const binaryString = atob(base64String);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+// ==================== Transaction RPC Methods ====================
+export interface BlockhashResult {
+  blockhash: string;
+  lastValidBlockHeight: number;
+}
+
+export async function getLatestBlockhash(
+  rpcUrl: string = X1_RPC_URL,
+): Promise<BlockhashResult> {
+  const result = await rpcCall('getLatestBlockhash', [], rpcUrl);
+  return {
+    blockhash: result.value.blockhash,
+    lastValidBlockHeight: result.value.lastValidBlockHeight,
+  };
+}
+
+export interface SimulateResult {
+  err: any;
+  unitsConsumed: number;
+  logs: string[];
+}
+
+export async function simulateTransaction(
+  txBase64: string,
+  rpcUrl: string = X1_RPC_URL,
+): Promise<SimulateResult> {
+  const result = await rpcCall(
+    'simulateTransaction',
+    [txBase64, {encoding: 'base64', replaceRecentBlockhash: true}],
+    rpcUrl,
+  );
+  return {
+    err: result.value?.err ?? null,
+    unitsConsumed: result.value?.unitsConsumed ?? 200000,
+    logs: result.value?.logs ?? [],
+  };
+}
+
+export async function sendRawTransaction(
+  txBase64: string,
+  rpcUrl: string = X1_RPC_URL,
+): Promise<string> {
+  const signature = await rpcCall(
+    'sendTransaction',
+    [txBase64, {encoding: 'base64', skipPreflight: false}],
+    rpcUrl,
+  );
+  return signature as string;
+}
+
+export async function confirmTransaction(
+  signature: string,
+  rpcUrl: string = X1_RPC_URL,
+  timeoutMs: number = 30000,
+): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const result = await rpcCall(
+      'getSignatureStatuses',
+      [[signature], {searchTransactionHistory: false}],
+      rpcUrl,
+    );
+    const status = result?.value?.[0];
+    if (status !== null && status !== undefined) {
+      if (status.err) {
+        throw new Error(`Transaction failed: ${JSON.stringify(status.err)}`);
+      }
+      if (
+        status.confirmationStatus === 'confirmed' ||
+        status.confirmationStatus === 'finalized'
+      ) {
+        return true;
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 1500));
+  }
+  throw new Error('Transaction confirmation timed out');
 }
 
 // ==================== Token Metadata ====================

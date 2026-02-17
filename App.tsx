@@ -15,6 +15,8 @@ import {
   PermissionsAndroid,
   TextInput,
   RefreshControl,
+  Modal,
+  FlatList,
 } from 'react-native';
 import {
   SeedVault,
@@ -23,15 +25,11 @@ import {
 import FontAwesome from '@react-native-vector-icons/fontawesome';
 
 import {
-  rpcCall,
-  USDC_MINT,
-  WRAPPED_XNT_MINT,
-  PoolPrice,
-  fetchPoolFromAPI,
-  PoolInfoFromAPI,
-  getTokenBalance,
-  getTokenMetadata,
-  TokenMetadata,
+  SwapToken,
+  SwapNetwork,
+  getSwapTokens,
+  fetchSwapQuote,
+  executeSwap,
 } from './src/swap';
 import {fetchAllTokens, PortfolioToken} from './src/portfolio';
 
@@ -67,19 +65,23 @@ function App(): JSX.Element {
   ]);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [swapFromToken, setSwapFromToken] = useState<'XNT' | 'USDC'>('XNT');
-  const [swapToToken, setSwapToToken] = useState<'XNT' | 'USDC'>('USDC');
+  // ── Swap state ──────────────────────────────────────────────────────────────
+  const [swapNetwork, setSwapNetwork] = useState<SwapNetwork>('X1 Mainnet');
+  const [swapTokenList, setSwapTokenList] = useState<SwapToken[]>([]);
+  const [swapFromToken, setSwapFromToken] = useState<SwapToken | null>(null);
+  const [swapToToken, setSwapToToken] = useState<SwapToken | null>(null);
   const [swapFromAmount, setSwapFromAmount] = useState('');
   const [swapToAmount, setSwapToAmount] = useState('');
-  const [swapPrice, setSwapPrice] = useState<PoolPrice | null>(null);
-  const [swapPoolApi, setSwapPoolApi] = useState<PoolInfoFromAPI | null>(null);
-  const [isLoadingSwap, setIsLoadingSwap] = useState(false);
-  const [xntBalance, setXntBalance] = useState<string>('0.00');
-  const [usdcBalance, setUsdcBalance] = useState<string>('0.00');
-  const [usdcMetadata, setUsdcMetadata] = useState<TokenMetadata | null>(null);
+  const [isLoadingSwapTokens, setIsLoadingSwapTokens] = useState(false);
+  const [isLoadingQuote, setIsLoadingQuote] = useState(false);
+  const [isExecutingSwap, setIsExecutingSwap] = useState(false);
   const [slippage, setSlippage] = useState<number>(0.5);
   const [showSlippageModal, setShowSlippageModal] = useState(false);
   const [customSlippage, setCustomSlippage] = useState<string>('');
+  const [showTokenSelector, setShowTokenSelector] = useState<
+    'from' | 'to' | null
+  >(null);
+  const [derivationPath, setDerivationPath] = useState<string>('');
 
   useEffect(() => {
     const initAuth = async () => {
@@ -98,55 +100,36 @@ function App(): JSX.Element {
     initAuth();
   }, []);
 
+  // Load swap token list whenever we enter the swap tab or the network changes
   useEffect(() => {
-    const loadSwapPool = async () => {
-      if (!publicKey) {
-        return;
-      }
+    if (!connected || !publicKey || activeTab !== 'swap') {
+      return;
+    }
+    const loadTokens = async () => {
+      setIsLoadingSwapTokens(true);
       try {
-        setIsLoadingSwap(true);
-
-        const [nativeXntBal, usdcBal, poolApi, usdcMeta] = await Promise.all([
-          rpcCall('getBalance', [publicKey]),
-          getTokenBalance(publicKey, USDC_MINT),
-          fetchPoolFromAPI(WRAPPED_XNT_MINT, USDC_MINT),
-          getTokenMetadata(USDC_MINT),
-        ]);
-
-        setUsdcMetadata(usdcMeta);
-
-        const xntBalanceLamports = nativeXntBal.value || 0;
-        setXntBalance((xntBalanceLamports / 1e9).toFixed(4));
-        setUsdcBalance((usdcBal / 1e6).toFixed(4));
-
-        if (poolApi) {
-          setSwapPoolApi(poolApi);
-
-          const price: PoolPrice = {
-            pool_address: poolApi.pool_address,
-            token_0_mint: poolApi.token1_address,
-            token_1_mint: poolApi.token2_address,
-            reserve_0: poolApi.amount1_without_fee,
-            reserve_1: poolApi.amount2_without_fee,
-            price:
-              poolApi.amount1_without_fee > 0
-                ? poolApi.amount2_without_fee / poolApi.amount1_without_fee
-                : 0,
-            token_0_usd_price: null,
-            token_1_usd_price: 1,
-          };
-          setSwapPrice(price);
+        const swapToks = await getSwapTokens(publicKey, swapNetwork);
+        setSwapTokenList(swapToks);
+        // Default from: first token with balance
+        if (swapToks.length >= 1 && !swapFromToken) {
+          setSwapFromToken(swapToks[0]);
         }
-      } catch (error) {
-        console.error('Failed to load swap pool:', error);
+        // Default to: first token that is different from from token
+        if (swapToks.length >= 1 && !swapToToken) {
+          const toDefault = swapToks.find(t => t.mint !== swapToks[0]?.mint);
+          if (toDefault) {
+            setSwapToToken(toDefault);
+          }
+        }
+      } catch (err) {
+        console.error('[App] Failed to load swap tokens:', err);
       } finally {
-        setIsLoadingSwap(false);
+        setIsLoadingSwapTokens(false);
       }
     };
-    if (connected) {
-      loadSwapPool();
-    }
-  }, [connected, publicKey]);
+    loadTokens();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, publicKey, swapNetwork, activeTab]);
 
   const checkAndRequestPermission = async (): Promise<boolean> => {
     if (Platform.OS !== 'android') {
@@ -253,46 +236,136 @@ function App(): JSX.Element {
     setIsAuthorized(false);
   };
 
-  const calculateSwapOutput = useCallback(
-    (amount: string) => {
-      if (!amount || !swapPrice || !swapPoolApi) {
+  // Fetch quote whenever from/to token or amount changes (debounced)
+  const fetchQuote = useCallback(
+    async (amount: string) => {
+      if (
+        !swapFromToken ||
+        !swapToToken ||
+        !amount ||
+        parseFloat(amount) <= 0
+      ) {
         setSwapToAmount('');
         return;
       }
-
-      const amountNum = parseFloat(amount);
-      if (isNaN(amountNum) || amountNum <= 0) {
+      setIsLoadingQuote(true);
+      try {
+        const result = await fetchSwapQuote({
+          network: swapNetwork,
+          tokenIn: swapFromToken.apiMint,
+          tokenOut: swapToToken.apiMint,
+          tokenInAmount: parseFloat(amount),
+          isExactAmountIn: true,
+        });
+        const decimals = Math.min(swapToToken.decimals, 6);
+        setSwapToAmount(result.tokenOutAmount.toFixed(decimals));
+      } catch (err) {
+        console.error('[App] Quote error:', err);
         setSwapToAmount('');
-        return;
+      } finally {
+        setIsLoadingQuote(false);
       }
-
-      const inputMint = swapFromToken === 'XNT' ? WRAPPED_XNT_MINT : USDC_MINT;
-      const isInputToken0 = inputMint === swapPrice.token_0_mint;
-
-      let output: number;
-      if (isInputToken0) {
-        output = amountNum * swapPrice.price;
-      } else {
-        output = amountNum / swapPrice.price;
-      }
-
-      setSwapToAmount(output.toFixed(6));
     },
-    [swapPrice, swapPoolApi, swapFromToken],
+    [swapFromToken, swapToToken, swapNetwork],
   );
 
   const handleFromAmountChange = (text: string) => {
     setSwapFromAmount(text);
-    calculateSwapOutput(text);
+    fetchQuote(text);
   };
 
-  const handleSwapTokens = () => {
-    const newFromToken = swapToToken;
-    const newToToken = swapFromToken;
-    setSwapFromToken(newFromToken);
-    setSwapToToken(newToToken);
+  const handleSwapDirection = () => {
+    const prev = swapFromToken;
+    setSwapFromToken(swapToToken);
+    setSwapToToken(prev);
     setSwapFromAmount('');
     setSwapToAmount('');
+  };
+
+  const handleSelectFromToken = (token: SwapToken) => {
+    setSwapFromToken(token);
+    setSwapNetwork(token.network === 'X1' ? 'X1 Mainnet' : 'Solana Mainnet');
+    // Clear to-token if it's same as newly selected from-token
+    if (swapToToken?.mint === token.mint) {
+      setSwapToToken(null);
+    }
+    setSwapFromAmount('');
+    setSwapToAmount('');
+    setShowTokenSelector(null);
+  };
+
+  const handleSelectToToken = (token: SwapToken) => {
+    setSwapToToken(token);
+    setSwapFromAmount('');
+    setSwapToAmount('');
+    setShowTokenSelector(null);
+  };
+
+  const handleExecuteSwap = async () => {
+    if (
+      !swapFromToken ||
+      !swapToToken ||
+      !swapFromAmount ||
+      !currentAuthToken
+    ) {
+      return;
+    }
+    const amount = parseFloat(swapFromAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Invalid amount', 'Please enter a valid amount');
+      return;
+    }
+    if (amount > swapFromToken.balance) {
+      Alert.alert(
+        'Insufficient balance',
+        `You only have ${swapFromToken.balance} ${swapFromToken.symbol}`,
+      );
+      return;
+    }
+    setIsExecutingSwap(true);
+    try {
+      // Get derivation path if not cached
+      let path = derivationPath;
+      if (!path) {
+        const accounts = await SeedVault.getUserWallets(currentAuthToken);
+        if (accounts.length === 0) {
+          throw new Error('No wallet accounts found');
+        }
+        path = accounts[0].derivationPath;
+        setDerivationPath(path);
+      }
+      const result = await executeSwap({
+        network: swapNetwork,
+        wallet: publicKey,
+        tokenIn: swapFromToken,
+        tokenOut: swapToToken,
+        tokenInAmount: amount,
+        slippagePercent:
+          slippage < 0 ? parseFloat(customSlippage) || 0.5 : slippage,
+        authToken: currentAuthToken,
+        derivationPath: path,
+      });
+      if (result.success) {
+        Alert.alert(
+          'Swap Successful',
+          `Transaction confirmed!\n${result.signature?.slice(0, 16)}...`,
+        );
+        setSwapFromAmount('');
+        setSwapToAmount('');
+        // Refresh token list after swap
+        const refreshedTokens = await getSwapTokens(publicKey, swapNetwork);
+        setSwapTokenList(refreshedTokens);
+        // Sync portfolio
+        await fetchBalances(publicKey);
+      } else {
+        Alert.alert('Swap Failed', result.error || 'Unknown error');
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      Alert.alert('Swap Error', msg);
+    } finally {
+      setIsExecutingSwap(false);
+    }
   };
 
   const checkAuthorization = async (): Promise<boolean> => {
@@ -543,227 +616,352 @@ function App(): JSX.Element {
     </View>
   );
 
-  const renderSwapScreen = () => (
-    <View style={styles.screenContainer}>
-      <View style={styles.screenHeader}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => setActiveTab('portfolio')}>
-          <FontAwesome name="arrow-left" size={20} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.screenTitle}>Swap</Text>
-        <View style={styles.placeholder} />
-      </View>
-
-      {isLoadingSwap ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#38B6FF" />
-          <Text style={styles.loadingText}>Loading pool...</Text>
+  // ── Token icon helper ────────────────────────────────────────────────────────
+  const renderTokenIcon = (token: SwapToken | null, size: number = 28) => {
+    if (!token) {
+      return (
+        <View
+          style={[
+            styles.swapTokenIconPlaceholder,
+            {width: size, height: size, borderRadius: size / 2},
+          ]}>
+          <Text style={styles.swapTokenIconText}>?</Text>
         </View>
-      ) : swapPrice ? (
-        <View style={styles.swapContent}>
-          <View style={styles.swapCard}>
-            <View style={styles.tokenRow}>
-              <View style={styles.tokenInfo}>
-                <Text style={styles.tokenLabel}>From</Text>
+      );
+    }
+    if (token.logo) {
+      return (
+        <Image
+          source={{uri: token.logo}}
+          style={[
+            styles.swapTokenIcon,
+            {width: size, height: size, borderRadius: size / 2},
+          ]}
+        />
+      );
+    }
+    return (
+      <View
+        style={[
+          styles.swapTokenIconPlaceholder,
+          {width: size, height: size, borderRadius: size / 2},
+        ]}>
+        <Text style={styles.swapTokenIconText}>
+          {token.symbol.charAt(0).toUpperCase()}
+        </Text>
+      </View>
+    );
+  };
+
+  // ── Token Selector Modal ─────────────────────────────────────────────────────
+  const renderTokenSelectorModal = () => {
+    const isFrom = showTokenSelector === 'from';
+    const onSelect = isFrom ? handleSelectFromToken : handleSelectToToken;
+    const disabledMint = isFrom ? swapToToken?.mint : swapFromToken?.mint;
+
+    // From: allow all tokens (native XNT/SOL now supported via prepareApiMint)
+    // To:   only show tokens on the same network as 'from'.
+    const filteredTokens = isFrom
+      ? swapTokenList
+      : swapTokenList.filter(
+          t => t.network === (swapFromToken?.network ?? t.network),
+        );
+
+    const x1Tokens = filteredTokens.filter(t => t.network === 'X1');
+    const solTokens = filteredTokens.filter(t => t.network === 'Solana');
+
+    return (
+      <Modal
+        visible={showTokenSelector !== null}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowTokenSelector(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                Select {isFrom ? 'From' : 'To'} Token
+              </Text>
+              <TouchableOpacity onPress={() => setShowTokenSelector(null)}>
+                <FontAwesome name="times" size={20} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            <FlatList
+              data={[
+                ...(x1Tokens.length > 0
+                  ? [{type: 'header', label: 'X1 Mainnet', key: 'h-x1'}]
+                  : []),
+                ...x1Tokens.map(t => ({type: 'token', token: t, key: t.mint})),
+                ...(solTokens.length > 0
+                  ? [{type: 'header', label: 'Solana Mainnet', key: 'h-sol'}]
+                  : []),
+                ...solTokens.map(t => ({type: 'token', token: t, key: t.mint})),
+              ]}
+              keyExtractor={item => item.key}
+              renderItem={({item}: {item: any}) => {
+                if (item.type === 'header') {
+                  return (
+                    <View style={styles.tokenGroupHeader}>
+                      <View
+                        style={[
+                          styles.networkDot,
+                          item.label.includes('X1')
+                            ? styles.networkDotX1
+                            : styles.networkDotSol,
+                        ]}
+                      />
+                      <Text style={styles.tokenGroupLabel}>{item.label}</Text>
+                    </View>
+                  );
+                }
+                const t: SwapToken = item.token;
+                const disabled = t.mint === disabledMint;
+                return (
+                  <TouchableOpacity
+                    style={[
+                      styles.tokenListItem,
+                      disabled && styles.tokenListItemDisabled,
+                    ]}
+                    onPress={() => !disabled && onSelect(t)}
+                    disabled={disabled}>
+                    {renderTokenIcon(t, 36)}
+                    <View style={styles.tokenListInfo}>
+                      <Text style={styles.tokenListSymbol}>{t.symbol}</Text>
+                      <Text style={styles.tokenListName}>{t.name}</Text>
+                    </View>
+                    <Text style={styles.tokenListBalance}>
+                      {t.balance > 0
+                        ? t.balance.toFixed(Math.min(t.decimals, 4))
+                        : ''}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              }}
+              style={styles.tokenFlatList}
+            />
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  // ── Swap Screen ───────────────────────────────────────────────────────────────
+  const renderSwapScreen = () => {
+    const canSwap =
+      !!swapFromToken &&
+      !!swapToToken &&
+      !!swapFromAmount &&
+      parseFloat(swapFromAmount) > 0 &&
+      !isExecutingSwap;
+
+    const currentSlippage =
+      slippage < 0 ? parseFloat(customSlippage) || 0.5 : slippage;
+
+    return (
+      <View style={styles.screenContainer}>
+        {renderTokenSelectorModal()}
+
+        <View style={styles.screenHeader}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => setActiveTab('portfolio')}>
+            <FontAwesome name="arrow-left" size={20} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.screenTitle}>Swap</Text>
+          {/* Network badge */}
+          <View
+            style={[
+              styles.networkBadgePill,
+              swapNetwork === 'X1 Mainnet'
+                ? styles.networkBadgePillX1
+                : styles.networkBadgePillSol,
+            ]}>
+            <Text style={styles.networkBadgePillText}>
+              {swapNetwork === 'X1 Mainnet' ? 'X1' : 'Solana'}
+            </Text>
+          </View>
+        </View>
+
+        {isLoadingSwapTokens ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#38B6FF" />
+            <Text style={styles.loadingText}>Loading tokens...</Text>
+          </View>
+        ) : (
+          <View style={styles.swapContent}>
+            {/* ── From ── */}
+            <View style={styles.swapCard}>
+              <Text style={styles.tokenLabel}>From</Text>
+              <View style={styles.tokenRow}>
                 <TouchableOpacity
                   style={styles.tokenSelector}
-                  onPress={() =>
-                    setSwapFromToken(swapFromToken === 'XNT' ? 'USDC' : 'XNT')
-                  }>
-                  {swapFromToken === 'XNT' ? (
-                    <Image
-                      source={{
-                        uri: 'https://app.xdex.xyz/assets/images/tokens/x1.webp',
-                      }}
-                      style={styles.swapTokenIcon}
-                    />
-                  ) : swapFromToken === 'USDC' && usdcMetadata?.logo_uri ? (
-                    <Image
-                      source={{uri: usdcMetadata.logo_uri}}
-                      style={styles.swapTokenIcon}
-                    />
-                  ) : (
-                    <View style={styles.swapTokenIconPlaceholder}>
-                      <Text style={styles.swapTokenIconText}>U</Text>
-                    </View>
-                  )}
+                  onPress={() => setShowTokenSelector('from')}>
+                  {renderTokenIcon(swapFromToken)}
                   <Text style={styles.swapTokenSymbol}>
-                    {swapFromToken === 'XNT' ? 'XNT' : 'USDC.X'}
+                    {swapFromToken?.symbol ?? 'Select'}
                   </Text>
                   <FontAwesome name="chevron-down" size={12} color="#888" />
                 </TouchableOpacity>
-                <Text style={styles.swapBalanceLabel}>
-                  Balance: {swapFromToken === 'XNT' ? xntBalance : usdcBalance}
-                </Text>
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.amountInput}
+                    value={swapFromAmount}
+                    onChangeText={handleFromAmountChange}
+                    placeholder="0.00"
+                    placeholderTextColor="#888"
+                    keyboardType="decimal-pad"
+                    editable={!isExecutingSwap}
+                  />
+                </View>
               </View>
-              <View style={styles.inputContainer}>
-                <TextInput
-                  style={styles.amountInput}
-                  value={swapFromAmount}
-                  onChangeText={handleFromAmountChange}
-                  placeholder="0.00"
-                  placeholderTextColor="#888"
-                  keyboardType="decimal-pad"
-                />
+              <Text style={styles.swapBalanceLabel}>
+                Balance:{' '}
+                {swapFromToken
+                  ? swapFromToken.balance.toFixed(
+                      Math.min(swapFromToken.decimals, 4),
+                    )
+                  : '—'}
+              </Text>
+
+              {/* Percent buttons */}
+              <View style={styles.percentButtons}>
+                {[25, 50, 75, 100].map(pct => (
+                  <TouchableOpacity
+                    key={pct}
+                    style={styles.percentButton}
+                    onPress={() => {
+                      if (!swapFromToken || swapFromToken.balance <= 0) {
+                        return;
+                      }
+                      const amt = (swapFromToken.balance * pct) / 100;
+                      const dec = Math.min(swapFromToken.decimals, 6);
+                      const str = amt.toFixed(dec);
+                      setSwapFromAmount(str);
+                      fetchQuote(str);
+                    }}>
+                    <Text style={styles.percentButtonText}>{pct}%</Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             </View>
 
-            <View style={styles.percentButtons}>
-              {[25, 50, 75, 100].map(percent => (
-                <TouchableOpacity
-                  key={percent}
-                  style={styles.percentButton}
-                  onPress={() => {
-                    const tokenBalance =
-                      swapFromToken === 'XNT' ? xntBalance : usdcBalance;
-                    if (parseFloat(tokenBalance) > 0) {
-                      const amount = (parseFloat(tokenBalance) * percent) / 100;
-                      const decimals = swapFromToken === 'XNT' ? 4 : 2;
-                      setSwapFromAmount(amount.toFixed(decimals));
-                      calculateSwapOutput(amount.toFixed(decimals));
-                    }
-                  }}>
-                  <Text style={styles.percentButtonText}>{percent}%</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
+            {/* ── Direction button ── */}
             <TouchableOpacity
               style={styles.swapDirectionButton}
-              onPress={handleSwapTokens}>
+              onPress={handleSwapDirection}>
               <FontAwesome name="arrow-down" size={16} color="#38B6FF" />
             </TouchableOpacity>
 
-            <View style={styles.tokenRow}>
-              <View style={styles.tokenInfo}>
-                <Text style={styles.tokenLabel}>To</Text>
+            {/* ── To ── */}
+            <View style={styles.swapCard}>
+              <Text style={styles.tokenLabel}>To</Text>
+              <View style={styles.tokenRow}>
                 <TouchableOpacity
                   style={styles.tokenSelector}
-                  onPress={() =>
-                    setSwapToToken(swapToToken === 'XNT' ? 'USDC' : 'XNT')
-                  }>
-                  {swapToToken === 'XNT' ? (
-                    <Image
-                      source={{
-                        uri: 'https://app.xdex.xyz/assets/images/tokens/x1.webp',
-                      }}
-                      style={styles.swapTokenIcon}
-                    />
-                  ) : swapToToken === 'USDC' && usdcMetadata?.logo_uri ? (
-                    <Image
-                      source={{uri: usdcMetadata.logo_uri}}
-                      style={styles.swapTokenIcon}
-                    />
-                  ) : (
-                    <View style={styles.swapTokenIconPlaceholder}>
-                      <Text style={styles.swapTokenIconText}>U</Text>
-                    </View>
-                  )}
+                  onPress={() => setShowTokenSelector('to')}>
+                  {renderTokenIcon(swapToToken)}
                   <Text style={styles.swapTokenSymbol}>
-                    {swapToToken === 'XNT' ? 'XNT' : 'USDC.X'}
+                    {swapToToken?.symbol ?? 'Select'}
                   </Text>
                   <FontAwesome name="chevron-down" size={12} color="#888" />
                 </TouchableOpacity>
-                <Text style={styles.swapBalanceLabel}>
-                  Balance: {swapToToken === 'XNT' ? xntBalance : usdcBalance}
-                </Text>
+                <View style={styles.inputContainer}>
+                  {isLoadingQuote ? (
+                    <ActivityIndicator size="small" color="#38B6FF" />
+                  ) : (
+                    <Text style={styles.outputAmount}>
+                      {swapToAmount || '0.00'}
+                    </Text>
+                  )}
+                </View>
               </View>
-              <View style={styles.inputContainer}>
-                <Text style={styles.outputAmount}>
-                  {swapToAmount || '0.00'}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.priceInfo}>
-            <Text style={styles.priceLabel}>Price</Text>
-            <Text style={styles.priceValue}>
-              1 {swapFromToken === 'XNT' ? 'XNT' : 'USDC.X'} ={' '}
-              {swapPrice.price.toFixed(6)}{' '}
-              {swapToToken === 'XNT' ? 'XNT' : 'USDC.X'}
-            </Text>
-          </View>
-
-          <View style={styles.slippageRow}>
-            <Text style={styles.slippageLabel}>Slippage</Text>
-            <TouchableOpacity
-              style={styles.slippageButton}
-              onPress={() => setShowSlippageModal(true)}>
-              <Text style={styles.slippageButtonText}>
-                {slippage < 0 ? `${customSlippage}%` : `${slippage}%`}
+              <Text style={styles.swapBalanceLabel}>
+                Balance:{' '}
+                {swapToToken
+                  ? swapToToken.balance.toFixed(
+                      Math.min(swapToToken.decimals, 4),
+                    )
+                  : '—'}
               </Text>
-              <FontAwesome name="chevron-down" size={12} color="#888" />
-            </TouchableOpacity>
-          </View>
+            </View>
 
-          {showSlippageModal && (
-            <View style={styles.slippageModal}>
-              {[0.5, 1, 2, 5].map(value => (
-                <TouchableOpacity
-                  key={value}
-                  style={[
-                    styles.slippageOption,
-                    slippage === value && styles.slippageOptionActive,
-                  ]}
-                  onPress={() => {
-                    setSlippage(value);
-                    setShowSlippageModal(false);
-                  }}>
-                  <Text
+            {/* ── Slippage ── */}
+            <View style={styles.slippageRow}>
+              <Text style={styles.slippageLabel}>Slippage</Text>
+              <TouchableOpacity
+                style={styles.slippageButton}
+                onPress={() => setShowSlippageModal(!showSlippageModal)}>
+                <Text style={styles.slippageButtonText}>
+                  {currentSlippage}%
+                </Text>
+                <FontAwesome name="chevron-down" size={12} color="#888" />
+              </TouchableOpacity>
+            </View>
+
+            {showSlippageModal && (
+              <View style={styles.slippageModal}>
+                {[0.5, 1, 2, 5].map(value => (
+                  <TouchableOpacity
+                    key={value}
                     style={[
-                      styles.slippageOptionText,
-                      slippage === value && styles.slippageOptionTextActive,
-                    ]}>
-                    {value}%
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              <View style={styles.slippageCustomRow}>
-                <Text style={styles.slippageCustomLabel}>Custom:</Text>
-                <TextInput
-                  style={styles.slippageCustomInput}
-                  value={customSlippage}
-                  onChangeText={text => {
-                    const num = parseFloat(text);
-                    if (!isNaN(num) && num >= 0 && num <= 100) {
+                      styles.slippageOption,
+                      slippage === value && styles.slippageOptionActive,
+                    ]}
+                    onPress={() => {
+                      setSlippage(value);
+                      setShowSlippageModal(false);
+                    }}>
+                    <Text
+                      style={[
+                        styles.slippageOptionText,
+                        slippage === value && styles.slippageOptionTextActive,
+                      ]}>
+                      {value}%
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                <View style={styles.slippageCustomRow}>
+                  <Text style={styles.slippageCustomLabel}>Custom:</Text>
+                  <TextInput
+                    style={styles.slippageCustomInput}
+                    value={customSlippage}
+                    onChangeText={text => {
                       setCustomSlippage(text);
                       setSlippage(-1);
-                    }
-                  }}
-                  onEndEditing={() => setShowSlippageModal(false)}
-                  placeholder="0"
-                  placeholderTextColor="#555"
-                  keyboardType="decimal-pad"
-                />
-                <Text style={styles.slippageCustomLabel}>%</Text>
+                    }}
+                    onEndEditing={() => setShowSlippageModal(false)}
+                    placeholder="0"
+                    placeholderTextColor="#555"
+                    keyboardType="decimal-pad"
+                  />
+                  <Text style={styles.slippageCustomLabel}>%</Text>
+                </View>
               </View>
-            </View>
-          )}
+            )}
 
-          <TouchableOpacity
-            style={[
-              styles.swapButton,
-              (!swapFromAmount || parseFloat(swapFromAmount) <= 0) &&
-                styles.swapButtonDisabled,
-            ]}
-            disabled={!swapFromAmount || parseFloat(swapFromAmount) <= 0}>
-            <Text style={styles.swapButtonText}>Swap</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.poolInfo}>
-            Pool: {swapPoolApi?.pool_address.slice(0, 8)}...
-            {swapPoolApi?.pool_address.slice(-4)}
-          </Text>
-        </View>
-      ) : (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>No XNT/USDC pool available</Text>
-        </View>
-      )}
-    </View>
-  );
+            {/* ── Swap Button ── */}
+            <TouchableOpacity
+              style={[styles.swapButton, !canSwap && styles.swapButtonDisabled]}
+              disabled={!canSwap}
+              onPress={handleExecuteSwap}>
+              {isExecutingSwap ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.swapButtonText}>
+                  {!swapFromToken || !swapToToken
+                    ? 'Select Tokens'
+                    : !swapFromAmount || parseFloat(swapFromAmount) <= 0
+                    ? 'Enter Amount'
+                    : 'Swap'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    );
+  };
 
   const renderContent = () => {
     switch (activeTab) {
@@ -1324,6 +1522,112 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#888',
     fontSize: 16,
+  },
+  // ── Token selector modal ──────────────────────────────────────────────────
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#111',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 32,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  tokenFlatList: {
+    flex: 1,
+  },
+  tokenGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#0a0a0a',
+  },
+  networkDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  networkDotX1: {
+    backgroundColor: '#38B6FF',
+  },
+  networkDotSol: {
+    backgroundColor: '#9945FF',
+  },
+  tokenGroupLabel: {
+    color: '#888',
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  tokenListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a1a1a',
+  },
+  tokenListItemDisabled: {
+    opacity: 0.35,
+  },
+  tokenListInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  tokenListSymbol: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  tokenListName: {
+    color: '#888',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  tokenListBalance: {
+    color: '#aaa',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  // ── Network badge pill in swap header ────────────────────────────────────
+  networkBadgePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  networkBadgePillX1: {
+    backgroundColor: '#38B6FF22',
+    borderWidth: 1,
+    borderColor: '#38B6FF',
+  },
+  networkBadgePillSol: {
+    backgroundColor: '#9945FF22',
+    borderWidth: 1,
+    borderColor: '#9945FF',
+  },
+  networkBadgePillText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });
 

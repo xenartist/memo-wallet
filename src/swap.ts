@@ -2,26 +2,95 @@
 
 import {
   rpcCall,
-  base64Decode,
-  readPubkey,
-  readU64,
+  base64DecodeToUint8Array,
+  base64Encode,
   USDC_MINT,
-  WRAPPED_XNT_MINT,
   X1_RPC_URL,
+  SwapNetwork,
+  rpcUrlForNetwork,
+  getLatestBlockhash,
+  simulateTransaction,
+  sendRawTransaction,
+  confirmTransaction,
+  fetchXDEXWalletTokens,
 } from './rpc';
+
+import {
+  InstructionJSON,
+  buildTransactionBytes,
+  addComputeBudgetInstructions,
+  insertSignature,
+  decodeSignatureFromBase64,
+  serializeToBase64,
+} from './transaction';
+
+import {SeedVault} from '@solana-mobile/seed-vault-lib';
 
 // Re-export commonly used constants for swap consumers
 export {USDC_MINT, WRAPPED_XNT_MINT} from './rpc';
 export {rpcCall} from './rpc';
 export type {TokenMetadata} from './rpc';
 export {getTokenMetadata} from './rpc';
+export type {SwapNetwork} from './rpc';
 
 // ==================== xDEX Constants ====================
 export const XDEX_PROGRAM_ID = 'sEsYH97wqmfnkzHedjNcw3zyJdPvUmsa9AixhS4b4fN';
-
 const XDEX_API_URL = 'https://api.xdex.xyz/api/xendex';
 
+// Native mint used for XNT (X1) and SOL (Solana) in API calls
+export const NATIVE_MINT = 'So11111111111111111111111111111111111111111';
+// The wallet-level "null mint" sentinel used in portfolio
+const PORTFOLIO_NATIVE_MINT = '111111111111111111111111111111111111111111';
+
+// Both X1 and Solana networks use the WRAPPED mint (So...112) in the
+// xDEX quote API.
+const WRAPPED_NATIVE_MINT = 'So11111111111111111111111111111111111111112';
+
+/**
+ * Mint to use in the /swap/quote API (GET).
+ * Native tokens (null / all-1s / So...111 / So...112) → WRAPPED_NATIVE_MINT (So...112).
+ */
+export function toApiMint(mint: string | null): string {
+  if (
+    mint === null ||
+    mint === PORTFOLIO_NATIVE_MINT ||
+    mint === NATIVE_MINT ||
+    mint === WRAPPED_NATIVE_MINT
+  ) {
+    return WRAPPED_NATIVE_MINT;
+  }
+  return mint;
+}
+
+/**
+ * Mint to use as token_in in the /swap/prepare API (POST).
+ * For native tokens used as INPUT, pass the portfolio native mint (all-1s)
+ * — the prepare API recognises this and checks the correct SOL/XNT balance.
+ * For non-native tokens the mint is passed through unchanged.
+ */
+export function toPrepareTokenInMint(mint: string | null): string {
+  if (
+    mint === null ||
+    mint === PORTFOLIO_NATIVE_MINT ||
+    mint === NATIVE_MINT ||
+    mint === WRAPPED_NATIVE_MINT
+  ) {
+    return PORTFOLIO_NATIVE_MINT;
+  }
+  return mint;
+}
+
+export function isNativeMint(mint: string | null): boolean {
+  return (
+    mint === null ||
+    mint === PORTFOLIO_NATIVE_MINT ||
+    mint === NATIVE_MINT ||
+    mint === WRAPPED_NATIVE_MINT
+  );
+}
+
 // ==================== Types ====================
+
 export interface PoolInfo {
   address: string;
   token_0_mint: string;
@@ -60,7 +129,20 @@ export interface PoolInfoFromAPI {
   mint1Decimals: number;
 }
 
-// ==================== xDEX API ====================
+export interface SwapToken {
+  mint: string; // portfolio mint (may be PORTFOLIO_NATIVE_MINT for natives)
+  apiMint: string; // mint for /swap/quote (So...112 for natives)
+  prepareApiMint: string; // mint for /swap/prepare token_in (111...111 for natives)
+  symbol: string;
+  name: string;
+  logo: string | null;
+  balance: number;
+  decimals: number;
+  network: 'X1' | 'Solana';
+}
+
+// ==================== xDEX Pool API ====================
+
 export async function fetchPoolFromAPI(
   token1Mint: string,
   token2Mint: string,
@@ -97,81 +179,294 @@ export async function fetchPoolFromAPI(
   }
 }
 
-// ==================== Pool Parsing ====================
-function parsePoolState(address: string, data: number[]): PoolInfo | null {
-  if (data.length < 400) {
-    return null;
-  }
+// ==================== Pool List API ====================
 
-  const poolCreator = readPubkey(data, 40);
-  const token0Vault = readPubkey(data, 72);
-  const token1Vault = readPubkey(data, 104);
-  const token0Mint = readPubkey(data, 168);
-  const token1Mint = readPubkey(data, 200);
-  const status = data[329] ?? 0;
-  const token0Decimals = data[331] ?? 9;
-  const token1Decimals = data[332] ?? 9;
-  const lpSupply = data.length >= 341 ? readU64(data, 333) : 0;
-
-  return {
-    address,
-    token_0_mint: token0Mint,
-    token_1_mint: token1Mint,
-    token_0_decimals: token0Decimals,
-    token_1_decimals: token1Decimals,
-    token_0_vault: token0Vault,
-    token_1_vault: token1Vault,
-    lp_supply: lpSupply,
-    status,
-    pool_creator: poolCreator,
-  };
+export interface PoolPair {
+  poolAddress: string;
+  token1Mint: string;
+  token1Symbol: string;
+  token1Logo: string | null;
+  token2Mint: string;
+  token2Symbol: string;
+  token2Logo: string | null;
 }
 
-export async function getAllPools(): Promise<PoolInfo[]> {
-  const result = await rpcCall('getProgramAccounts', [
-    XDEX_PROGRAM_ID,
-    {encoding: 'base64'},
+export async function fetchPoolList(network: SwapNetwork): Promise<PoolPair[]> {
+  try {
+    const url = `${XDEX_API_URL}/pool/list?network=${encodeURIComponent(
+      network,
+    )}`;
+    console.log('[Swap] fetchPoolList url:', url);
+    const response = await fetch(url);
+    const data = await response.json();
+    console.log(
+      '[Swap] fetchPoolList response (first 3):',
+      JSON.stringify(data?.data?.slice?.(0, 3)),
+    );
+    if (!data.success || !Array.isArray(data.data)) {
+      return [];
+    }
+    return (data.data as any[]).map((p: any) => ({
+      poolAddress: p.pool_address,
+      token1Mint: p.token1_address,
+      token1Symbol: p.token1_symbol,
+      token1Logo: p.token1_logo
+        ? p.token1_logo.startsWith('http')
+          ? p.token1_logo
+          : `https://x1logos.s3.us-east-1.amazonaws.com/${p.token1_logo}`
+        : null,
+      token2Mint: p.token2_address,
+      token2Symbol: p.token2_symbol,
+      token2Logo: p.token2_logo
+        ? p.token2_logo.startsWith('http')
+          ? p.token2_logo
+          : `https://x1logos.s3.us-east-1.amazonaws.com/${p.token2_logo}`
+        : null,
+    }));
+  } catch (error) {
+    console.error('[Swap] Failed to fetch pool list:', error);
+    return [];
+  }
+}
+
+// ==================== Swap Token List ====================
+
+/**
+ * Build a deduplicated list of SwapTokens for a wallet on a given network.
+ * We merge user's held tokens with all tokens that appear in pools, so the
+ * user can swap even tokens they don't yet hold (as destination).
+ */
+export async function getSwapTokens(
+  walletAddress: string,
+  network: SwapNetwork,
+): Promise<SwapToken[]> {
+  const netLabel: 'X1' | 'Solana' = network === 'X1 Mainnet' ? 'X1' : 'Solana';
+
+  const [walletTokens, pools] = await Promise.all([
+    fetchXDEXWalletTokens(walletAddress, network).catch(err => {
+      console.error('[Swap] Failed to fetch wallet tokens:', err);
+      return [];
+    }),
+    fetchPoolList(network).catch(err => {
+      console.error('[Swap] Failed to fetch pool list:', err);
+      return [];
+    }),
   ]);
 
-  const pools: PoolInfo[] = [];
+  const map = new Map<string, SwapToken>();
 
-  if (Array.isArray(result)) {
-    for (const account of result) {
-      const pubkey = account.pubkey;
-      const dataArray = account.account?.data;
-      if (dataArray && dataArray[0]) {
-        const decoded = base64Decode(dataArray[0]);
-        try {
-          const poolInfo = parsePoolState(pubkey, decoded);
-          if (poolInfo) {
-            pools.push(poolInfo);
-          }
-        } catch (e) {
-          console.log('Failed to parse pool:', pubkey, e);
-        }
+  // Add wallet tokens first (they have balance info)
+  for (const t of walletTokens) {
+    if (t.is_lp_token) {
+      continue;
+    }
+    const mint =
+      t.mint === PORTFOLIO_NATIVE_MINT ? PORTFOLIO_NATIVE_MINT : t.mint;
+    map.set(mint, {
+      mint,
+      apiMint: toApiMint(mint),
+      prepareApiMint: toPrepareTokenInMint(mint),
+      symbol: t.symbol,
+      name: t.name,
+      logo: t.imageUrl || null,
+      balance: t.ui_amount,
+      decimals: t.decimals,
+      network: netLabel,
+    });
+  }
+
+  // Add pool tokens that user may not hold (balance = 0).
+  // Use NATIVE_MINT as the canonical key for native tokens to avoid duplicates.
+  for (const pool of pools) {
+    for (const [rawMint, rawSymbol, logo] of [
+      [pool.token1Mint, pool.token1Symbol, pool.token1Logo],
+      [pool.token2Mint, pool.token2Symbol, pool.token2Logo],
+    ] as [string, string, string | null][]) {
+      // Normalise: wrapped native → native key
+      const mapKey = isNativeMint(rawMint) ? NATIVE_MINT : rawMint;
+      const apiMint = toApiMint(rawMint);
+      const prepareApiMint = toPrepareTokenInMint(rawMint);
+      // Use friendly symbol for native tokens
+      const symbol = isNativeMint(rawMint)
+        ? netLabel === 'X1'
+          ? 'XNT'
+          : 'SOL'
+        : rawSymbol;
+      if (!map.has(mapKey)) {
+        map.set(mapKey, {
+          mint: mapKey,
+          apiMint,
+          prepareApiMint,
+          symbol,
+          name: symbol,
+          logo,
+          balance: 0,
+          decimals: 9,
+          network: netLabel,
+        });
       }
     }
   }
 
-  return pools;
+  // Sort: highest balance first, then alphabetical
+  const tokens = Array.from(map.values());
+  tokens.sort((a, b) => {
+    if (b.balance !== a.balance) {
+      return b.balance - a.balance;
+    }
+    return a.symbol.localeCompare(b.symbol);
+  });
+  return tokens;
 }
 
-export async function findPoolsForPair(
-  tokenA: string,
-  tokenB: string,
-): Promise<PoolInfo[]> {
-  const allPools = await getAllPools();
+// ==================== Quote API ====================
 
-  return allPools.filter(
-    pool =>
-      (pool.token_0_mint === tokenA && pool.token_1_mint === tokenB) ||
-      (pool.token_0_mint === tokenB && pool.token_1_mint === tokenA),
-  );
+export interface SwapQuoteParams {
+  network: SwapNetwork;
+  tokenIn: string; // apiMint
+  tokenOut: string; // apiMint
+  tokenInAmount: number;
+  isExactAmountIn?: boolean;
 }
 
-export async function findXNTPools(): Promise<PoolInfo[]> {
-  const xntMint = WRAPPED_XNT_MINT;
-  return findPoolsForPair(xntMint, USDC_MINT);
+export interface SwapQuoteResult {
+  tokenInAmount: number;
+  tokenOutAmount: number;
+  priceImpact: number | null;
+  minAmountOut: number | null;
+  raw: any;
+}
+
+export async function fetchSwapQuote(
+  params: SwapQuoteParams,
+): Promise<SwapQuoteResult> {
+  const {
+    network,
+    tokenIn,
+    tokenOut,
+    tokenInAmount,
+    isExactAmountIn = true,
+  } = params;
+  const url =
+    `${XDEX_API_URL}/swap/quote` +
+    `?network=${encodeURIComponent(network)}` +
+    `&token_in=${tokenIn}` +
+    `&token_out=${tokenOut}` +
+    `&token_in_amount=${tokenInAmount}` +
+    `&is_exact_amount_in=${isExactAmountIn}`;
+
+  console.log('[Swap] Quote url:', url);
+  const response = await fetch(url);
+  const data = await response.json();
+  console.log('[Swap] Quote response:', JSON.stringify(data));
+
+  if (!response.ok || !data.success) {
+    throw new Error(
+      data?.message || data?.error || `Quote API error: ${response.status}`,
+    );
+  }
+
+  const d = data.data ?? data;
+  return {
+    tokenInAmount: d.token_in_amount ?? d.tokenInAmount ?? tokenInAmount,
+    tokenOutAmount: d.token_out_amount ?? d.tokenOutAmount ?? 0,
+    priceImpact: d.price_impact ?? d.priceImpact ?? null,
+    minAmountOut: d.minimum_amount_out ?? d.minAmountOut ?? null,
+    raw: d,
+  };
+}
+
+// ==================== Prepare API ====================
+
+export interface SwapPrepareParams {
+  network: SwapNetwork;
+  wallet: string;
+  tokenIn: string; // apiMint
+  tokenOut: string; // apiMint
+  tokenInAmount: number;
+  isExactAmountIn?: boolean;
+}
+
+export interface SwapPrepareResult {
+  // Set when API returns pre-built serialised transaction(s)
+  transactionBase64: string | null;
+  // Set when API returns raw instruction list (future-proofing)
+  instructions: InstructionJSON[];
+  blockhash: string | null;
+  raw: any;
+}
+
+export async function fetchSwapPrepare(
+  params: SwapPrepareParams,
+): Promise<SwapPrepareResult> {
+  const {
+    network,
+    wallet,
+    tokenIn,
+    tokenOut,
+    tokenInAmount,
+    isExactAmountIn = true,
+  } = params;
+
+  const body = {
+    network,
+    wallet,
+    token_in: tokenIn,
+    token_out: tokenOut,
+    token_in_amount: tokenInAmount,
+    is_exact_amount_in: isExactAmountIn,
+  };
+
+  console.log('[Swap] Prepare body:', JSON.stringify(body));
+
+  const response = await fetch(`${XDEX_API_URL}/swap/prepare`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+
+  const data = await response.json();
+  console.log('[Swap] Prepare response:', JSON.stringify(data));
+
+  if (!response.ok || !data.success) {
+    throw new Error(
+      data?.message || data?.error || `Prepare API error: ${response.status}`,
+    );
+  }
+
+  const raw = data.data ?? data;
+
+  // API returns a pre-built serialised transaction (most common path)
+  if (raw.transaction) {
+    // transaction may be a string or an array — take first element
+    const txRaw = Array.isArray(raw.transaction)
+      ? raw.transaction[0]
+      : raw.transaction;
+    const txBase64 = typeof txRaw === 'string' ? txRaw : null;
+    console.log(
+      '[Swap] Prepare returned serialised tx, length:',
+      txBase64?.length,
+      'blockhash:',
+      raw.blockhash,
+    );
+    return {
+      transactionBase64: txBase64,
+      instructions: [],
+      blockhash: raw.blockhash ?? null,
+      raw,
+    };
+  }
+
+  // Fallback: instruction list format
+  let instructions: InstructionJSON[] = [];
+  if (Array.isArray(raw.instructions)) {
+    instructions = raw.instructions;
+  } else if (Array.isArray(raw)) {
+    instructions = raw;
+  }
+
+  console.log('[Swap] Prepare instructions count:', instructions.length);
+  return {transactionBase64: null, instructions, blockhash: null, raw};
 }
 
 // ==================== Token Balance ====================
@@ -245,42 +540,208 @@ export async function getPoolPrice(poolInfo: PoolInfo): Promise<PoolPrice> {
   };
 }
 
-// ==================== Swap Instructions ====================
-export function getSwapInstructionData(
-  amountInLamports: number,
-  minimumAmountOut: number,
-): number[] {
-  const discriminator = [143, 190, 90, 218, 196, 30, 51, 222];
+// ==================== Execute Swap ====================
 
-  const amountInBytes = [];
-  let temp = amountInLamports;
-  for (let i = 0; i < 8; i++) {
-    amountInBytes.push(temp % 256);
-    temp = Math.floor(temp / 256);
-  }
-
-  const minAmountOutBytes = [];
-  temp = minimumAmountOut;
-  for (let i = 0; i < 8; i++) {
-    minAmountOutBytes.push(temp % 256);
-    temp = Math.floor(temp / 256);
-  }
-
-  return [...discriminator, ...amountInBytes, ...minAmountOutBytes];
+export interface ExecuteSwapParams {
+  network: SwapNetwork;
+  wallet: string;
+  tokenIn: SwapToken;
+  tokenOut: SwapToken;
+  tokenInAmount: number; // human-readable (e.g. 1.5 XNT)
+  slippagePercent: number;
+  authToken: number;
+  derivationPath: string;
 }
 
-export async function getLatestBlockhash(): Promise<string> {
+export interface ExecuteSwapResult {
+  success: boolean;
+  signature?: string;
+  error?: string;
+}
+
+export async function executeSwap(
+  params: ExecuteSwapParams,
+): Promise<ExecuteSwapResult> {
+  const {
+    network,
+    wallet,
+    tokenIn,
+    tokenOut,
+    tokenInAmount,
+    authToken,
+    derivationPath,
+  } = params;
+
+  const rpcUrl = rpcUrlForNetwork(network);
+
+  try {
+    // ── 1. Prepare: get serialised transaction from xDEX API ─────────────────
+    const prepareResult = await fetchSwapPrepare({
+      network,
+      wallet,
+      tokenIn: tokenIn.prepareApiMint,
+      tokenOut: tokenOut.apiMint,
+      tokenInAmount,
+      isExactAmountIn: true,
+    });
+
+    if (prepareResult.transactionBase64) {
+      // Most common path: API returns a ready-to-sign serialised transaction
+      return await _signAndSendSerializedTx(
+        prepareResult.transactionBase64,
+        authToken,
+        derivationPath,
+        rpcUrl,
+      );
+    }
+
+    if (prepareResult.instructions.length === 0) {
+      throw new Error(
+        'Prepare API returned neither a transaction nor instructions',
+      );
+    }
+
+    // ── Fallback: instruction list path ──────────────────────────────────────
+    // 2. Get blockhash
+    const {blockhash} = await getLatestBlockhash(rpcUrl);
+
+    // 3. Build & simulate initial tx to get CU
+    const initialTxBytes = buildTransactionBytes({
+      instructions: prepareResult.instructions,
+      payer: wallet,
+      recentBlockhash: blockhash,
+    });
+    const simResult = await simulateTransaction(
+      serializeToBase64(initialTxBytes),
+      rpcUrl,
+    );
+    console.log('[Swap] Simulation result:', JSON.stringify(simResult));
+    if (simResult.err) {
+      throw new Error(
+        `Simulation failed: ${JSON.stringify(
+          simResult.err,
+        )}\n${simResult.logs.join('\n')}`,
+      );
+    }
+
+    // 4. Rebuild with CU budget instructions
+    const computeUnits = Math.max(
+      Math.ceil((simResult.unitsConsumed || 200000) * 1.2),
+      50000,
+    );
+    const finalInstructions = addComputeBudgetInstructions(
+      prepareResult.instructions,
+      computeUnits,
+      1000,
+    );
+    const {blockhash: freshBlockhash} = await getLatestBlockhash(rpcUrl);
+    const finalTxBytes = buildTransactionBytes({
+      instructions: finalInstructions,
+      payer: wallet,
+      recentBlockhash: freshBlockhash,
+    });
+    const finalTxBase64 = serializeToBase64(finalTxBytes);
+
+    // 5. Sign via Seed Vault
+    console.log(
+      '[Swap] Requesting signature from Seed Vault (instruction path)...',
+    );
+    const signingResult = await SeedVault.signTransaction(
+      authToken,
+      derivationPath,
+      finalTxBase64,
+    );
+    console.log('[Swap] Signing result:', JSON.stringify(signingResult));
+    if (!signingResult.signatures || signingResult.signatures.length === 0) {
+      throw new Error('Seed Vault returned no signatures');
+    }
+    const sig = decodeSignatureFromBase64(
+      signingResult.signatures[0] as string,
+    );
+    const signedTxBytes = insertSignature(finalTxBytes, sig, 0);
+    const signedTxBase64 = serializeToBase64(signedTxBytes);
+
+    // 6. Send & confirm
+    const txSignature = await sendRawTransaction(signedTxBase64, rpcUrl);
+    console.log('[Swap] Transaction sent:', txSignature);
+    await confirmTransaction(txSignature, rpcUrl, 40000);
+    console.log('[Swap] Transaction confirmed:', txSignature);
+    return {success: true, signature: txSignature};
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[Swap] executeSwap error:', msg);
+    return {success: false, error: msg};
+  }
+}
+
+/**
+ * Sign and send a pre-serialised base64 transaction from the prepare API.
+ * Flow:
+ *   1. Simulate to get required CU (replaceRecentBlockhash=true)
+ *   2. Sign with Seed Vault
+ *   3. Insert signature into original tx bytes
+ *   4. Send & confirm
+ */
+async function _signAndSendSerializedTx(
+  txBase64: string,
+  authToken: number,
+  derivationPath: string,
+  rpcUrl: string,
+): Promise<ExecuteSwapResult> {
+  console.log('[Swap] Signing pre-built serialised transaction...');
+
+  // 1. Simulate to get CU (replaceRecentBlockhash avoids stale blockhash errors)
+  const simResult = await simulateTransaction(txBase64, rpcUrl);
+  console.log(
+    '[Swap] Simulation unitsConsumed:',
+    simResult.unitsConsumed,
+    'err:',
+    simResult.err,
+  );
+  if (simResult.err) {
+    throw new Error(
+      `Simulation failed: ${JSON.stringify(
+        simResult.err,
+      )}\n${simResult.logs.join('\n')}`,
+    );
+  }
+
+  // 2. Sign with Seed Vault — pass the original tx bytes as-is
+  console.log('[Swap] Requesting signature from Seed Vault...');
+  const signingResult = await SeedVault.signTransaction(
+    authToken,
+    derivationPath,
+    txBase64,
+  );
+  console.log('[Swap] Signing result keys:', Object.keys(signingResult));
+  console.log('[Swap] signatures count:', signingResult.signatures?.length);
+
+  if (!signingResult.signatures || signingResult.signatures.length === 0) {
+    throw new Error('Seed Vault returned no signatures');
+  }
+
+  // 3. Insert signature into tx bytes
+  const txBytes = base64DecodeToUint8Array(txBase64);
+  const sig = decodeSignatureFromBase64(signingResult.signatures[0] as string);
+  console.log('[Swap] Signature length:', sig.length);
+  const signedTxBytes = insertSignature(txBytes, sig, 0);
+  const signedTxBase64 = base64Encode(signedTxBytes);
+
+  // 4. Send
+  console.log('[Swap] Sending signed transaction...');
+  const txSignature = await sendRawTransaction(signedTxBase64, rpcUrl);
+  console.log('[Swap] Transaction sent:', txSignature);
+
+  // 5. Confirm
+  await confirmTransaction(txSignature, rpcUrl, 40000);
+  console.log('[Swap] Transaction confirmed:', txSignature);
+  return {success: true, signature: txSignature};
+}
+
+// ==================== Legacy helpers (kept for compatibility) ====================
+export async function getLatestBlockhashLegacy(): Promise<string> {
   const result = await rpcCall('getLatestBlockhash');
   return result.value.blockhash;
-}
-
-export async function simulateTransaction(
-  transactionBase64: string,
-): Promise<any> {
-  return rpcCall('simulateTransaction', [
-    transactionBase64,
-    {encoding: 'base64'},
-  ]);
 }
 
 export function calculateMinimumOutput(
