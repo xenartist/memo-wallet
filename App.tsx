@@ -613,7 +613,7 @@ function App(): JSX.Element {
                   </Text>
                   <FontAwesome name="chevron-down" size={12} color="#888" />
                 </TouchableOpacity>
-                <Text style={styles.tokenBalance}>
+                <Text style={styles.swapBalanceLabel}>
                   Balance: {swapFromToken === 'XNT' ? xntBalance : usdcBalance}
                 </Text>
               </View>
@@ -685,7 +685,7 @@ function App(): JSX.Element {
                   </Text>
                   <FontAwesome name="chevron-down" size={12} color="#888" />
                 </TouchableOpacity>
-                <Text style={styles.tokenBalance}>
+                <Text style={styles.swapBalanceLabel}>
                   Balance: {swapToToken === 'XNT' ? xntBalance : usdcBalance}
                 </Text>
               </View>
@@ -1051,6 +1051,9 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 12,
   },
+  tokenBalance: {
+    alignItems: 'flex-end',
+  },
   tokenBalanceText: {
     color: '#fff',
     fontSize: 16,
@@ -1180,7 +1183,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
   },
-  tokenBalance: {
+  swapBalanceLabel: {
     color: '#888',
     fontSize: 12,
     marginTop: 4,
