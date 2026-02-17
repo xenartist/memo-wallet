@@ -690,13 +690,7 @@ async function _signAndSendSerializedTx(
 ): Promise<ExecuteSwapResult> {
   console.log('[Swap] Signing pre-built serialised transaction...');
 
-  // 1. Simulate to verify tx is valid
-  const simResult = await simulateTransaction(txBase64, rpcUrl);
-  if (simResult.err) {
-    throw new Error(`Simulation failed: ${JSON.stringify(simResult.err)}`);
-  }
-
-  // 2. Extract message and sign only the message
+  // 1. Extract message and sign only the message
   // The pre-built tx from API has placeholder sigs (zeros). We need to sign
   // just the message portion, then insert the signature.
   const txBytes = base64DecodeToUint8Array(txBase64);
