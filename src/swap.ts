@@ -690,40 +690,36 @@ async function _signAndSendSerializedTx(
 ): Promise<ExecuteSwapResult> {
   console.log('[Swap] Signing pre-built serialised transaction...');
 
-  // 1. Simulate to get CU (replaceRecentBlockhash avoids stale blockhash errors)
+  // 1. Simulate to verify tx is valid
   const simResult = await simulateTransaction(txBase64, rpcUrl);
-  console.log(
-    '[Swap] Simulation unitsConsumed:',
-    simResult.unitsConsumed,
-    'err:',
-    simResult.err,
-  );
   if (simResult.err) {
-    throw new Error(
-      `Simulation failed: ${JSON.stringify(
-        simResult.err,
-      )}\n${simResult.logs.join('\n')}`,
-    );
+    throw new Error(`Simulation failed: ${JSON.stringify(simResult.err)}`);
   }
 
-  // 2. Sign with Seed Vault — pass the original tx bytes as-is
-  console.log('[Swap] Requesting signature from Seed Vault...');
-  const signingResult = await SeedVault.signTransaction(
+  // 2. Extract message and sign only the message
+  // The pre-built tx from API has placeholder sigs (zeros). We need to sign
+  // just the message portion, then insert the signature.
+  const txBytes = base64DecodeToUint8Array(txBase64);
+  const numSignatures = txBytes[0];
+  const messageStart = 1 + numSignatures * 64;
+  const messageBytes = txBytes.slice(messageStart);
+  const messageBase64 = base64Encode(messageBytes);
+
+  const msgSigningResult = await SeedVault.signTransaction(
     authToken,
     derivationPath,
-    txBase64,
+    messageBase64,
   );
-  console.log('[Swap] Signing result keys:', Object.keys(signingResult));
-  console.log('[Swap] signatures count:', signingResult.signatures?.length);
-
-  if (!signingResult.signatures || signingResult.signatures.length === 0) {
+  if (
+    !msgSigningResult.signatures ||
+    msgSigningResult.signatures.length === 0
+  ) {
     throw new Error('Seed Vault returned no signatures');
   }
 
-  // 3. Insert signature into tx bytes
-  const txBytes = base64DecodeToUint8Array(txBase64);
-  const sig = decodeSignatureFromBase64(signingResult.signatures[0] as string);
-  console.log('[Swap] Signature length:', sig.length);
+  const sig = decodeSignatureFromBase64(
+    msgSigningResult.signatures[0] as string,
+  );
   const signedTxBytes = insertSignature(txBytes, sig, 0);
   const signedTxBase64 = base64Encode(signedTxBytes);
 
