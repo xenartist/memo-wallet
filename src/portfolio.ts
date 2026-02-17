@@ -9,6 +9,7 @@ import {
   TOKEN_PROGRAM,
   TOKEN_2022_PROGRAM,
   TokenMetadata,
+  WRAPPED_SOL_MINT,
 } from './rpc';
 import {getSolanaTokensMetadata} from './jupiter';
 
@@ -21,7 +22,9 @@ export interface PortfolioToken {
   network: 'X1' | 'Solana';
   icon_uri: string | null;
   decimals: number;
-  rawBalance: number; // for sorting
+  rawBalance: number;
+  usdPrice: number | null;
+  usdValue: number | null;
 }
 
 interface ParsedTokenAccount {
@@ -87,6 +90,8 @@ async function buildX1PortfolioToken(
     icon_uri: metadata.logo_uri,
     decimals: account.decimals,
     rawBalance: balanceNum,
+    usdPrice: null,
+    usdValue: null,
   };
 }
 
@@ -95,6 +100,8 @@ function buildSolanaPortfolioToken(
   metadata: TokenMetadata,
 ): PortfolioToken {
   const balanceNum = account.balance / Math.pow(10, account.decimals);
+  const usdPrice = metadata.usd_price ?? null;
+  const usdValue = usdPrice !== null ? balanceNum * usdPrice : null;
 
   return {
     symbol: metadata.symbol || account.mint.slice(0, 6),
@@ -105,6 +112,8 @@ function buildSolanaPortfolioToken(
     icon_uri: metadata.logo_uri,
     decimals: account.decimals,
     rawBalance: balanceNum,
+    usdPrice,
+    usdValue,
   };
 }
 
@@ -182,6 +191,8 @@ export async function fetchAllTokens(
     icon_uri: XNT_ICON_URI,
     decimals: 9,
     rawBalance: xntBalance,
+    usdPrice: null,
+    usdValue: null,
   });
 
   // 2. Native SOL (Solana)
@@ -195,6 +206,8 @@ export async function fetchAllTokens(
     icon_uri: null, // uses local image in App.tsx
     decimals: 9,
     rawBalance: solBalance,
+    usdPrice: null,
+    usdValue: null,
   });
 
   // 3. Parse X1 SPL tokens (TOKEN_PROGRAM + TOKEN_2022)
@@ -218,21 +231,35 @@ export async function fetchAllTokens(
   tokens.push(...x1Tokens);
 
   // 6. Fetch metadata for Solana SPL tokens (Jupiter API, batched)
-  if (solTokenAccounts.length > 0) {
-    const solMints = solTokenAccounts.map(a => a.mint);
-    const solMetadataMap = await getSolanaTokensMetadata(solMints);
-    for (const account of solTokenAccounts) {
-      const metadata = solMetadataMap[account.mint] || {
-        mint: account.mint,
-        name: null,
-        symbol: null,
-        logo_uri: null,
-      };
-      tokens.push(buildSolanaPortfolioToken(account, metadata));
-    }
+  // Always query Wrapped SOL mint to get SOL price for native SOL
+  const solMints = [WRAPPED_SOL_MINT, ...solTokenAccounts.map(a => a.mint)];
+  const solMetadataMap = await getSolanaTokensMetadata(solMints);
+
+  // Native SOL: use Wrapped SOL price
+  const solUsdPrice = solMetadataMap[WRAPPED_SOL_MINT]?.usd_price ?? null;
+  const solUsdValue = solUsdPrice !== null ? solBalance * solUsdPrice : null;
+
+  // Update native SOL token with price
+  const nativeSolToken = tokens.find(
+    t => t.symbol === 'SOL' && t.mint === null,
+  );
+  if (nativeSolToken) {
+    nativeSolToken.usdPrice = solUsdPrice;
+    nativeSolToken.usdValue = solUsdValue;
   }
 
-  // 7. Sort: native tokens first (XNT, SOL), then by rawBalance descending
+  // Build Solana SPL tokens
+  for (const account of solTokenAccounts) {
+    const metadata = solMetadataMap[account.mint] || {
+      mint: account.mint,
+      name: null,
+      symbol: null,
+      logo_uri: null,
+    };
+    tokens.push(buildSolanaPortfolioToken(account, metadata));
+  }
+
+  // 7. Sort: native tokens first (XNT, SOL), then by usdValue descending
   tokens.sort((a, b) => {
     // Native tokens always first
     if (a.mint === null && b.mint !== null) {
@@ -245,7 +272,13 @@ export async function fetchAllTokens(
     if (a.mint === null && b.mint === null) {
       return a.symbol === 'XNT' ? -1 : 1;
     }
-    // SPL tokens sorted by balance descending
+    // SPL tokens sorted by usdValue descending (null = 0)
+    const aVal = a.usdValue ?? 0;
+    const bVal = b.usdValue ?? 0;
+    if (bVal !== aVal) {
+      return bVal - aVal;
+    }
+    // Fallback to rawBalance if usdValue equal
     return b.rawBalance - a.rawBalance;
   });
 

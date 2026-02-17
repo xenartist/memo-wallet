@@ -8,6 +8,7 @@ export const SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com';
 export const USDC_MINT = 'B69chRzqzDCmdB5WYB8NRu5Yv5ZA95ABiZcdzCgGm9Tq';
 export const NATIVE_XNT_MINT = 'So11111111111111111111111111111111111111111';
 export const WRAPPED_XNT_MINT = 'So11111111111111111111111111111111111111112';
+export const WRAPPED_SOL_MINT = 'So11111111111111111111111111111111111111112';
 
 // ==================== Program Addresses ====================
 export const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
@@ -24,6 +25,7 @@ export interface TokenMetadata {
   name: string | null;
   symbol: string | null;
   logo_uri: string | null;
+  usd_price?: number | null;
 }
 
 // ==================== Known Token Metadata ====================
