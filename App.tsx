@@ -27,9 +27,12 @@ import FontAwesome from '@react-native-vector-icons/fontawesome';
 import {
   SwapToken,
   SwapNetwork,
+  PoolPair,
   getSwapTokens,
   fetchSwapQuote,
   executeSwap,
+  toApiMint,
+  toPrepareTokenInMint,
 } from './src/swap';
 import {fetchAllTokens, PortfolioToken} from './src/portfolio';
 
@@ -70,6 +73,7 @@ function App(): JSX.Element {
   // ── Swap state ──────────────────────────────────────────────────────────────
   const [swapNetwork, setSwapNetwork] = useState<SwapNetwork>('X1 Mainnet');
   const [swapTokenList, setSwapTokenList] = useState<SwapToken[]>([]);
+  const [swapPoolList, setSwapPoolList] = useState<PoolPair[]>([]);
   const [swapFromToken, setSwapFromToken] = useState<SwapToken | null>(null);
   const [swapToToken, setSwapToToken] = useState<SwapToken | null>(null);
   const [swapFromAmount, setSwapFromAmount] = useState('');
@@ -108,12 +112,20 @@ function App(): JSX.Element {
     const loadTokens = async () => {
       setIsLoadingSwapTokens(true);
       try {
-        const swapToks = await getSwapTokens(publicKey, swapNetwork);
+        const {tokens: swapToks, pools: swapPools} = await getSwapTokens(
+          publicKey,
+          swapNetwork,
+        );
         setSwapTokenList(swapToks);
-        // Default from: XNT
+        setSwapPoolList(swapPools);
+        // Default from: XNT (must have balance)
         if (swapToks.length >= 1 && !swapFromToken) {
-          const xntToken = swapToks.find(t => t.symbol === 'XNT');
-          setSwapFromToken(xntToken || swapToks[0]);
+          const xntToken = swapToks.find(
+            t => t.symbol === 'XNT' && t.balance > 0,
+          );
+          setSwapFromToken(
+            xntToken || swapToks.find(t => t.balance > 0) || null,
+          );
         }
         // Default to: MEMO
         if (swapToks.length >= 1 && !swapToToken) {
@@ -395,8 +407,10 @@ function App(): JSX.Element {
         setSwapFromAmount('');
         setSwapToAmount('');
         // Refresh token list after swap
-        const refreshedTokens = await getSwapTokens(publicKey, swapNetwork);
+        const {tokens: refreshedTokens, pools: refreshedPools} =
+          await getSwapTokens(publicKey, swapNetwork);
         setSwapTokenList(refreshedTokens);
+        setSwapPoolList(refreshedPools);
         // Sync portfolio
         await fetchBalances(publicKey);
       } else {
@@ -703,13 +717,39 @@ function App(): JSX.Element {
     const onSelect = isFrom ? handleSelectFromToken : handleSelectToToken;
     const disabledMint = isFrom ? swapToToken?.mint : swapFromToken?.mint;
 
-    // From: allow all tokens (native XNT/SOL now supported via prepareApiMint)
-    // To:   only show tokens on the same network as 'from'.
+    // From: use portfolio tokens directly (already loaded, balance > 0 guaranteed).
+    // To:   only show tokens that have an active pool with the selected From token.
+
+    const fromTokensFromPortfolio: SwapToken[] = tokens
+      .filter(p => !p.symbol.includes('LP') && p.rawBalance > 0)
+      .map(p => ({
+        mint: p.mint ?? toApiMint(null),
+        apiMint: toApiMint(p.mint),
+        prepareApiMint: toPrepareTokenInMint(p.mint),
+        symbol: p.symbol,
+        name: p.name,
+        logo: p.icon_uri,
+        balance: p.rawBalance,
+        decimals: p.decimals,
+        network: p.network,
+      }));
+    const fromApiMint = swapFromToken?.apiMint ?? '';
     const filteredTokens = isFrom
-      ? swapTokenList
-      : swapTokenList.filter(
-          t => t.network === (swapFromToken?.network ?? t.network),
-        );
+      ? fromTokensFromPortfolio
+      : swapTokenList.filter(t => {
+          if (!swapFromToken) {
+            return false;
+          }
+          const candidateApiMint = t.apiMint;
+          return swapPoolList.some(
+            pool =>
+              pool.status === 0 &&
+              ((pool.token1Mint === fromApiMint &&
+                pool.token2Mint === candidateApiMint) ||
+                (pool.token2Mint === fromApiMint &&
+                  pool.token1Mint === candidateApiMint)),
+          );
+        });
 
     const x1Tokens = filteredTokens.filter(t => t.network === 'X1');
     const solTokens = filteredTokens.filter(t => t.network === 'Solana');
@@ -837,7 +877,10 @@ function App(): JSX.Element {
               <View style={styles.tokenRow}>
                 <TouchableOpacity
                   style={styles.tokenSelector}
-                  onPress={() => setShowTokenSelector('from')}>
+                  onPress={() =>
+                    !isLoadingSwapTokens && setShowTokenSelector('from')
+                  }
+                  disabled={isLoadingSwapTokens}>
                   {renderTokenIcon(swapFromToken)}
                   <Text style={styles.swapTokenSymbol}>
                     {swapFromToken?.symbol ?? 'Select'}
@@ -879,7 +922,10 @@ function App(): JSX.Element {
               <View style={styles.tokenRow}>
                 <TouchableOpacity
                   style={styles.tokenSelector}
-                  onPress={() => setShowTokenSelector('to')}>
+                  onPress={() =>
+                    !isLoadingSwapTokens && setShowTokenSelector('to')
+                  }
+                  disabled={isLoadingSwapTokens}>
                   {renderTokenIcon(swapToToken)}
                   <Text style={styles.swapTokenSymbol}>
                     {swapToToken?.symbol ?? 'Select'}
@@ -1453,7 +1499,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingBottom: 32,
-    maxHeight: '80%',
+    height: '75%',
   },
   modalHeader: {
     flexDirection: 'row',

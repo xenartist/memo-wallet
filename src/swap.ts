@@ -41,6 +41,8 @@ const XDEX_API_URL = 'https://api.xdex.xyz/api/xendex';
 export const NATIVE_MINT = 'So11111111111111111111111111111111111111111';
 // The wallet-level "null mint" sentinel used in portfolio
 const PORTFOLIO_NATIVE_MINT = '111111111111111111111111111111111111111111';
+// xDEX wallet/tokens API returns the 32-char system program address for native XNT/SOL
+const SYSTEM_PROGRAM_MINT = '11111111111111111111111111111111';
 
 // Both X1 and Solana networks use the WRAPPED mint (So...112) in the
 // xDEX quote API.
@@ -54,6 +56,7 @@ export function toApiMint(mint: string | null): string {
   if (
     mint === null ||
     mint === PORTFOLIO_NATIVE_MINT ||
+    mint === SYSTEM_PROGRAM_MINT ||
     mint === NATIVE_MINT ||
     mint === WRAPPED_NATIVE_MINT
   ) {
@@ -72,6 +75,7 @@ export function toPrepareTokenInMint(mint: string | null): string {
   if (
     mint === null ||
     mint === PORTFOLIO_NATIVE_MINT ||
+    mint === SYSTEM_PROGRAM_MINT ||
     mint === NATIVE_MINT ||
     mint === WRAPPED_NATIVE_MINT
   ) {
@@ -84,6 +88,7 @@ export function isNativeMint(mint: string | null): boolean {
   return (
     mint === null ||
     mint === PORTFOLIO_NATIVE_MINT ||
+    mint === SYSTEM_PROGRAM_MINT ||
     mint === NATIVE_MINT ||
     mint === WRAPPED_NATIVE_MINT
   );
@@ -189,6 +194,7 @@ export interface PoolPair {
   token2Mint: string;
   token2Symbol: string;
   token2Logo: string | null;
+  status: number; // 0 = active
 }
 
 export async function fetchPoolList(network: SwapNetwork): Promise<PoolPair[]> {
@@ -222,6 +228,7 @@ export async function fetchPoolList(network: SwapNetwork): Promise<PoolPair[]> {
           ? p.token2_logo
           : `https://x1logos.s3.us-east-1.amazonaws.com/${p.token2_logo}`
         : null,
+      status: p.pool_info?.status ?? 0,
     }));
   } catch (error) {
     console.error('[Swap] Failed to fetch pool list:', error);
@@ -231,15 +238,21 @@ export async function fetchPoolList(network: SwapNetwork): Promise<PoolPair[]> {
 
 // ==================== Swap Token List ====================
 
+export interface SwapTokensResult {
+  tokens: SwapToken[];
+  pools: PoolPair[];
+}
+
 /**
  * Build a deduplicated list of SwapTokens for a wallet on a given network.
  * We merge user's held tokens with all tokens that appear in pools, so the
  * user can swap even tokens they don't yet hold (as destination).
+ * Also returns the raw pool pairs so callers can filter valid To tokens.
  */
 export async function getSwapTokens(
   walletAddress: string,
   network: SwapNetwork,
-): Promise<SwapToken[]> {
+): Promise<SwapTokensResult> {
   const netLabel: 'X1' | 'Solana' = network === 'X1 Mainnet' ? 'X1' : 'Solana';
 
   const [walletTokens, pools] = await Promise.all([
@@ -260,8 +273,7 @@ export async function getSwapTokens(
     if (t.is_lp_token) {
       continue;
     }
-    const mint =
-      t.mint === PORTFOLIO_NATIVE_MINT ? PORTFOLIO_NATIVE_MINT : t.mint;
+    const mint = isNativeMint(t.mint) ? PORTFOLIO_NATIVE_MINT : t.mint;
     map.set(mint, {
       mint,
       apiMint: toApiMint(mint),
@@ -316,7 +328,7 @@ export async function getSwapTokens(
     }
     return a.symbol.localeCompare(b.symbol);
   });
-  return tokens;
+  return {tokens, pools};
 }
 
 // ==================== Quote API ====================
