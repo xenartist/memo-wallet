@@ -96,6 +96,8 @@ function App(): JSX.Element {
     [],
   );
   const [isSearchingJupiter, setIsSearchingJupiter] = useState(false);
+  const [swapSuccessModalVisible, setSwapSuccessModalVisible] = useState(false);
+  const [swapSuccessTxId, setSwapSuccessTxId] = useState('');
 
   useEffect(() => {
     const initAuth = async () => {
@@ -456,10 +458,8 @@ function App(): JSX.Element {
         });
       }
       if (result.success) {
-        Alert.alert(
-          'Swap Successful',
-          `Transaction confirmed!\n${result.signature?.slice(0, 16)}...`,
-        );
+        setSwapSuccessTxId(result.signature ?? '');
+        setSwapSuccessModalVisible(true);
         setSwapFromAmount('');
         setSwapToAmount('');
         // Refresh token list after swap
@@ -944,6 +944,75 @@ function App(): JSX.Element {
     );
   };
 
+  // ── Swap Success Modal ────────────────────────────────────────────────────────
+  const renderSwapSuccessModal = () => {
+    const txId = swapSuccessTxId;
+    const explorerBaseUrl =
+      swapNetwork === 'Solana Mainnet'
+        ? 'https://explorer.solana.com/tx/'
+        : 'https://explorer.mainnet.x1.xyz/tx/';
+    const explorerUrl = `${explorerBaseUrl}${txId}`;
+
+    const copyToClipboard = (text: string, label: string) => {
+      Clipboard.setString(text);
+      Alert.alert('Copied', `${label} copied to clipboard`);
+    };
+
+    return (
+      <Modal
+        visible={swapSuccessModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSwapSuccessModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.swapSuccessModal}>
+            <View style={styles.swapSuccessHeader}>
+              <FontAwesome name="check-circle" size={48} color="#4CAF50" />
+              <Text style={styles.swapSuccessTitle}>Swap Successful!</Text>
+            </View>
+
+            {/* Transaction ID */}
+            <View style={styles.swapSuccessRow}>
+              <Text style={styles.swapSuccessLabel}>Transaction ID</Text>
+              <View style={styles.swapSuccessValueRow}>
+                <Text style={styles.swapSuccessValue}>
+                  {txId.slice(0, 8)}...{txId.slice(-8)}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => copyToClipboard(txId, 'Transaction ID')}
+                  style={styles.swapSuccessCopyBtn}>
+                  <FontAwesome name="copy" size={16} color="#38B6FF" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Explorer URL */}
+            <View style={styles.swapSuccessRow}>
+              <Text style={styles.swapSuccessLabel}>Explorer</Text>
+              <View style={styles.swapSuccessValueRow}>
+                <Text style={styles.swapSuccessValue} numberOfLines={1}>
+                  {explorerUrl.slice(0, 30)}...
+                </Text>
+                <TouchableOpacity
+                  onPress={() => copyToClipboard(explorerUrl, 'Explorer URL')}
+                  style={styles.swapSuccessCopyBtn}>
+                  <FontAwesome name="copy" size={16} color="#38B6FF" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Close Button */}
+            <TouchableOpacity
+              style={styles.swapSuccessCloseBtn}
+              onPress={() => setSwapSuccessModalVisible(false)}>
+              <Text style={styles.swapSuccessCloseBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   // ── Swap Screen ───────────────────────────────────────────────────────────────
   const renderSwapScreen = () => {
     const canSwap =
@@ -1101,6 +1170,9 @@ function App(): JSX.Element {
             </TouchableOpacity>
           </View>
         )}
+
+        {/* Swap Success Modal */}
+        {renderSwapSuccessModal()}
       </View>
     );
   };
@@ -1737,6 +1809,61 @@ const styles = StyleSheet.create({
   networkBadgePillText: {
     color: '#fff',
     fontSize: 12,
+    fontWeight: '600',
+  },
+  swapSuccessModal: {
+    backgroundColor: '#111',
+    borderRadius: 20,
+    padding: 24,
+    marginHorizontal: 20,
+    width: '90%',
+    alignSelf: 'center',
+  },
+  swapSuccessHeader: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  swapSuccessTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    marginTop: 12,
+  },
+  swapSuccessRow: {
+    marginBottom: 16,
+  },
+  swapSuccessLabel: {
+    color: '#888',
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  swapSuccessValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 8,
+    padding: 10,
+  },
+  swapSuccessValue: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 14,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  swapSuccessCopyBtn: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  swapSuccessCloseBtn: {
+    backgroundColor: '#38B6FF',
+    borderRadius: 12,
+    paddingVertical: 12,
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  swapSuccessCloseBtnText: {
+    color: '#fff',
+    fontSize: 16,
     fontWeight: '600',
   },
 });
