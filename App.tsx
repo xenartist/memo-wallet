@@ -783,6 +783,46 @@ function App(): JSX.Element {
     }
   }, []);
 
+  // ── Token icon with network badge (for selector modal) ────────────────────────
+  const renderTokenIconWithBadge = (
+    token: SwapToken | null,
+    size: number = 36,
+  ) => {
+    return (
+      <View style={{position: 'relative', width: size, height: size}}>
+        {token?.logo ? (
+          <Image
+            source={{uri: token.logo}}
+            style={{width: size, height: size, borderRadius: size / 2}}
+          />
+        ) : (
+          <View
+            style={[
+              styles.swapTokenIconPlaceholder,
+              {width: size, height: size, borderRadius: size / 2},
+            ]}>
+            <Text style={styles.swapTokenIconText}>
+              {token?.symbol.charAt(0).toUpperCase() ?? '?'}
+            </Text>
+          </View>
+        )}
+        {token && (
+          <View
+            style={[
+              styles.tokenSelectorNetworkBadge,
+              token.network === 'X1'
+                ? styles.networkBadgeX1
+                : styles.networkBadgeSolana,
+            ]}>
+            <Text style={styles.tokenSelectorNetworkBadgeText}>
+              {token.network === 'X1' ? 'X1' : 'SOL'}
+            </Text>
+          </View>
+        )}
+      </View>
+    );
+  };
+
   // ── Token Selector Modal ─────────────────────────────────────────────────────
   const renderTokenSelectorModal = () => {
     const isFrom = showTokenSelector === 'from';
@@ -923,7 +963,7 @@ function App(): JSX.Element {
                     ]}
                     onPress={() => !disabled && onSelect(t)}
                     disabled={disabled}>
-                    {renderTokenIcon(t, 36)}
+                    {renderTokenIconWithBadge(t, 36)}
                     <View style={styles.tokenListInfo}>
                       <Text style={styles.tokenListSymbol}>{t.symbol}</Text>
                       <Text style={styles.tokenListName}>{t.name}</Text>
@@ -1443,6 +1483,19 @@ const styles = StyleSheet.create({
   networkBadgeText: {
     color: '#fff',
     fontSize: 8,
+    fontWeight: 'bold',
+  },
+  tokenSelectorNetworkBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    borderRadius: 3,
+  },
+  tokenSelectorNetworkBadgeText: {
+    color: '#fff',
+    fontSize: 7,
     fontWeight: 'bold',
   },
   tokenInfo: {
