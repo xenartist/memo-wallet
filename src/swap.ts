@@ -746,3 +746,415 @@ export async function getLatestBlockhashLegacy(): Promise<string> {
   const result = await rpcCall('getLatestBlockhash');
   return result.value.blockhash;
 }
+
+// ==================== Jupiter Integration ====================
+
+const JUPITER_API_BASE = 'https://api.jup.ag';
+const JUPITER_API_KEYS = [
+  'e23a33e6-6268-4b3c-b80e-891a9beadd0e',
+  '0e3975ba-66d0-4a32-b0b8-96911b9185b9',
+];
+
+// Wrapped SOL mint used by Jupiter for native SOL swaps
+export const JUPITER_SOL_MINT = 'So11111111111111111111111111111111111111112';
+
+async function jupiterFetch(path: string, options?: RequestInit): Promise<any> {
+  for (let i = 0; i < JUPITER_API_KEYS.length; i++) {
+    const key = JUPITER_API_KEYS[i];
+    try {
+      const res = await fetch(`${JUPITER_API_BASE}${path}`, {
+        ...options,
+        headers: {
+          'x-api-key': key,
+          'Content-Type': 'application/json',
+          ...(options?.headers ?? {}),
+        },
+      });
+      if (res.status === 429 && i < JUPITER_API_KEYS.length - 1) {
+        // rate limited — try backup key
+        continue;
+      }
+      return await res.json();
+    } catch (err) {
+      if (i === JUPITER_API_KEYS.length - 1) {
+        throw err;
+      }
+    }
+  }
+}
+
+// ── Default Solana token list (hardcoded, shown before user searches) ──────────
+
+export const JUPITER_DEFAULT_SOL_TOKENS: SwapToken[] = [
+  {
+    mint: 'So11111111111111111111111111111111111111112',
+    apiMint: 'So11111111111111111111111111111111111111112',
+    prepareApiMint: 'So11111111111111111111111111111111111111112',
+    symbol: 'SOL',
+    name: 'Solana',
+    logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
+    balance: 0,
+    decimals: 9,
+    network: 'Solana',
+  },
+  {
+    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    apiMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    prepareApiMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    symbol: 'USDC',
+    name: 'USD Coin',
+    logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+  {
+    mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+    apiMint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+    prepareApiMint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+    symbol: 'USDT',
+    name: 'USDT',
+    logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.svg',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+  {
+    mint: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',
+    apiMint: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',
+    prepareApiMint: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN',
+    symbol: 'JUP',
+    name: 'Jupiter',
+    logo: 'https://static.jup.ag/jup/icon.png',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+  {
+    mint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
+    apiMint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
+    prepareApiMint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
+    symbol: 'BONK',
+    name: 'Bonk',
+    logo: 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I',
+    balance: 0,
+    decimals: 5,
+    network: 'Solana',
+  },
+  {
+    mint: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm',
+    apiMint: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm',
+    prepareApiMint: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm',
+    symbol: 'WIF',
+    name: 'dogwifhat',
+    logo: 'https://bafkreibk3covs5ltyqxa272uodhculbr6kea6betidfwy3ajsav2vjzyum.ipfs.nftstorage.link',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+  {
+    mint: 'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3',
+    apiMint: 'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3',
+    prepareApiMint: 'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3',
+    symbol: 'PYTH',
+    name: 'Pyth Network',
+    logo: 'https://pyth.network/token.svg',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+  {
+    mint: 'jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL',
+    apiMint: 'jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL',
+    prepareApiMint: 'jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL',
+    symbol: 'JTO',
+    name: 'Jito',
+    logo: 'https://metadata.jito.network/token/jto/image',
+    balance: 0,
+    decimals: 9,
+    network: 'Solana',
+  },
+  {
+    mint: 'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE',
+    apiMint: 'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE',
+    prepareApiMint: 'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE',
+    symbol: 'ORCA',
+    name: 'Orca',
+    logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE/logo.png',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+  {
+    mint: '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R',
+    apiMint: '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R',
+    prepareApiMint: '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R',
+    symbol: 'RAY',
+    name: 'Raydium',
+    logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R/logo.png',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+  {
+    mint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',
+    apiMint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',
+    prepareApiMint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',
+    symbol: 'mSOL',
+    name: 'Marinade staked SOL',
+    logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So/logo.png',
+    balance: 0,
+    decimals: 9,
+    network: 'Solana',
+  },
+  {
+    mint: 'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1',
+    apiMint: 'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1',
+    prepareApiMint: 'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1',
+    symbol: 'bSOL',
+    name: 'BlazeStake Staked SOL',
+    logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1/logo.png',
+    balance: 0,
+    decimals: 9,
+    network: 'Solana',
+  },
+  {
+    mint: 'WENWENvqqNya429ubCdR81ZmD69brwQaaBYY6p3LCpk',
+    apiMint: 'WENWENvqqNya429ubCdR81ZmD69brwQaaBYY6p3LCpk',
+    prepareApiMint: 'WENWENvqqNya429ubCdR81ZmD69brwQaaBYY6p3LCpk',
+    symbol: 'WEN',
+    name: 'Wen',
+    logo: 'https://shdw-drive.genesysgo.net/GwJapVHVvfM4Mw4sU8tn7HnZj9y5REe3jabCnjZpSLKD/wen_logo.png',
+    balance: 0,
+    decimals: 5,
+    network: 'Solana',
+  },
+  {
+    mint: 'MEFNBXixkEbait3xn9bkm8WsJzXtVsaJEn4c8Sam21u',
+    apiMint: 'MEFNBXixkEbait3xn9bkm8WsJzXtVsaJEn4c8Sam21u',
+    prepareApiMint: 'MEFNBXixkEbait3xn9bkm8WsJzXtVsaJEn4c8Sam21u',
+    symbol: 'MEME',
+    name: 'Memecoin',
+    logo: 'https://bafkreibk3covs5ltyqxa272uodhculbr6kea6betidfwy3ajsav2vjzyum.ipfs.nftstorage.link',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+  {
+    mint: '7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr',
+    apiMint: '7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr',
+    prepareApiMint: '7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr',
+    symbol: 'POPCAT',
+    name: 'Popcat',
+    logo: 'https://bafkreiag3xst6zv73palwznkgmf73cjmrd6egsmydpjajdm5mpynmzfspy.ipfs.nftstorage.link',
+    balance: 0,
+    decimals: 9,
+    network: 'Solana',
+  },
+  {
+    mint: 'nosXBVoaCTtYdLvKY6Csb4AC8JCdQKKAaWYtx2ZMoo7',
+    apiMint: 'nosXBVoaCTtYdLvKY6Csb4AC8JCdQKKAaWYtx2ZMoo7',
+    prepareApiMint: 'nosXBVoaCTtYdLvKY6Csb4AC8JCdQKKAaWYtx2ZMoo7',
+    symbol: 'NOS',
+    name: 'Nosana',
+    logo: 'https://nosana.io/img/NOS_token.png',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+  {
+    mint: 'SHDWyBxihqiCj6YekG2GUr7wqKLeLAMK1gHZck9pL6y',
+    apiMint: 'SHDWyBxihqiCj6YekG2GUr7wqKLeLAMK1gHZck9pL6y',
+    prepareApiMint: 'SHDWyBxihqiCj6YekG2GUr7wqKLeLAMK1gHZck9pL6y',
+    symbol: 'SHDW',
+    name: 'Shadow Token',
+    logo: 'https://shdw-drive.genesysgo.net/FyvJxCR8P7NQJS7DApFbWfRgpDLq4bCjHNQ9cGJWr5xN/shadow-drive-logo.png',
+    balance: 0,
+    decimals: 9,
+    network: 'Solana',
+  },
+  {
+    mint: '6f8deE148nynnSiWshA9vLydEbJGpDeKh5G4PRgjmzG7',
+    apiMint: '6f8deE148nynnSiWshA9vLydEbJGpDeKh5G4PRgjmzG7',
+    prepareApiMint: '6f8deE148nynnSiWshA9vLydEbJGpDeKh5G4PRgjmzG7',
+    symbol: 'solXEN',
+    name: 'solXEN',
+    logo: 'https://solxen.io/solxen-icon.png',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+];
+
+// ── Jupiter interfaces ────────────────────────────────────────────────────────
+
+export interface JupiterOrderResult {
+  requestId: string;
+  transaction: string | null; // base64 unsigned tx (null when no taker)
+  inAmount: number;
+  outAmount: number;
+  inUsdValue: number | null;
+  outUsdValue: number | null;
+  errorCode: number | null;
+  errorMessage: string | null;
+}
+
+// ── fetchJupiterOrder ─────────────────────────────────────────────────────────
+/**
+ * Get a Jupiter Ultra swap order (quote + optionally an unsigned transaction).
+ * Pass `taker` to get a signable transaction; omit for a quote-only call.
+ * `amountLamports` is in native token units (e.g. 1 SOL = 1_000_000_000).
+ */
+export async function fetchJupiterOrder(params: {
+  inputMint: string;
+  outputMint: string;
+  amountLamports: number;
+  taker?: string;
+}): Promise<JupiterOrderResult> {
+  const {inputMint, outputMint, amountLamports, taker} = params;
+  let url =
+    '/ultra/v1/order' +
+    `?inputMint=${inputMint}` +
+    `&outputMint=${outputMint}` +
+    `&amount=${amountLamports}`;
+  if (taker) {
+    url += `&taker=${taker}`;
+  }
+
+  const data = await jupiterFetch(url);
+  return {
+    requestId: data.requestId ?? '',
+    transaction: data.transaction ?? null,
+    inAmount: Number(data.inAmount ?? 0),
+    outAmount: Number(data.outAmount ?? 0),
+    inUsdValue: data.inUsdValue ?? null,
+    outUsdValue: data.outUsdValue ?? null,
+    errorCode: data.errorCode ?? null,
+    errorMessage: data.errorMessage ?? null,
+  };
+}
+
+// ── searchJupiterTokens ───────────────────────────────────────────────────────
+/**
+ * Search Solana tokens via Jupiter Ultra search API.
+ * Returns up to 20 results matching the query (symbol / name / mint).
+ */
+export async function searchJupiterTokens(query: string): Promise<SwapToken[]> {
+  if (!query || query.trim().length < 1) {
+    return [];
+  }
+  try {
+    const data = await jupiterFetch(
+      `/ultra/v1/search?query=${encodeURIComponent(query.trim())}`,
+    );
+    if (!Array.isArray(data)) {
+      return [];
+    }
+    return (data as any[]).map(t => ({
+      mint: t.id,
+      apiMint: t.id,
+      prepareApiMint: t.id,
+      symbol: t.symbol ?? t.id.slice(0, 6),
+      name: t.name ?? t.symbol ?? '',
+      logo: t.icon ?? null,
+      balance: 0,
+      decimals: t.decimals ?? 6,
+      network: 'Solana' as const,
+    }));
+  } catch (err) {
+    console.error('[Jupiter] searchJupiterTokens error:', err);
+    return [];
+  }
+}
+
+// ── executeJupiterSwap ────────────────────────────────────────────────────────
+/**
+ * Full Jupiter Ultra swap flow:
+ *   1. Get order (unsigned tx + requestId)
+ *   2. Extract message bytes, sign with Seed Vault
+ *   3. Insert signature into tx
+ *   4. POST /execute with signedTransaction + requestId
+ */
+export async function executeJupiterSwap(params: {
+  inputMint: string;
+  outputMint: string;
+  amountLamports: number;
+  taker: string;
+  authToken: number;
+  derivationPath: string;
+}): Promise<ExecuteSwapResult> {
+  const {
+    inputMint,
+    outputMint,
+    amountLamports,
+    taker,
+    authToken,
+    derivationPath,
+  } = params;
+
+  try {
+    // 1. Get unsigned transaction
+    const order = await fetchJupiterOrder({
+      inputMint,
+      outputMint,
+      amountLamports,
+      taker,
+    });
+
+    if (!order.transaction) {
+      const msg =
+        order.errorMessage ??
+        `Jupiter order failed (code ${order.errorCode ?? 'unknown'})`;
+      throw new Error(msg);
+    }
+
+    // 2. Extract message bytes (same layout as xDEX legacy tx)
+    //    byte 0 = compact-u16 numSignatures (1 byte for ≤ 127 signers)
+    //    bytes 1 … numSigs*64 = signature placeholders (zeros)
+    //    bytes numSigs*64+1 … = message
+    const txBytes = base64DecodeToUint8Array(order.transaction);
+    const numSigs = txBytes[0];
+    const messageStart = 1 + numSigs * 64;
+    const messageBytes = txBytes.slice(messageStart);
+    const messageBase64 = base64Encode(messageBytes);
+
+    // 3. Sign with Seed Vault
+    console.log('[Jupiter] Requesting Seed Vault signature...');
+    const sigResult = await SeedVault.signTransaction(
+      authToken,
+      derivationPath,
+      messageBase64,
+    );
+    if (!sigResult.signatures || sigResult.signatures.length === 0) {
+      throw new Error('Seed Vault returned no signatures');
+    }
+    const sig = decodeSignatureFromBase64(sigResult.signatures[0] as string);
+
+    // 4. Insert signature at slot 0 (user signer)
+    const signedTxBytes = insertSignature(txBytes, sig, 0);
+    const signedTxBase64 = base64Encode(signedTxBytes);
+
+    // 5. Submit to Jupiter /execute
+    console.log('[Jupiter] Submitting to /execute...');
+    const execData = await jupiterFetch('/ultra/v1/execute', {
+      method: 'POST',
+      body: JSON.stringify({
+        signedTransaction: signedTxBase64,
+        requestId: order.requestId,
+      }),
+    });
+
+    console.log('[Jupiter] Execute response:', JSON.stringify(execData));
+
+    if (execData.error && execData.code !== 0) {
+      throw new Error(execData.error);
+    }
+
+    const signature: string = execData.signature ?? execData.txSignature ?? '';
+    return {success: true, signature};
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[Jupiter] executeJupiterSwap error:', msg);
+    return {success: false, error: msg};
+  }
+}

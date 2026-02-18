@@ -33,6 +33,11 @@ import {
   executeSwap,
   toApiMint,
   toPrepareTokenInMint,
+  JUPITER_SOL_MINT,
+  JUPITER_DEFAULT_SOL_TOKENS,
+  fetchJupiterOrder,
+  searchJupiterTokens,
+  executeJupiterSwap,
 } from './src/swap';
 import {fetchAllTokens, PortfolioToken} from './src/portfolio';
 
@@ -86,6 +91,11 @@ function App(): JSX.Element {
     'from' | 'to' | null
   >(null);
   const [derivationPath, setDerivationPath] = useState<string>('');
+  const [jupiterSearchQuery, setJupiterSearchQuery] = useState('');
+  const [jupiterSearchResults, setJupiterSearchResults] = useState<SwapToken[]>(
+    [],
+  );
+  const [isSearchingJupiter, setIsSearchingJupiter] = useState(false);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -265,20 +275,45 @@ function App(): JSX.Element {
     }
     setIsLoadingQuote(true);
     try {
-      // Use a fixed amount (1) to get the exchange rate
-      const result = await fetchSwapQuote({
-        network: swapNetwork,
-        tokenIn: swapFromToken.apiMint,
-        tokenOut: swapToToken.apiMint,
-        tokenInAmount: 1,
-        isExactAmountIn: true,
-      });
-      // Store the rate (output per 1 input)
-      setSwapQuoteRate(result.tokenOutAmount);
+      let rate: number;
+
+      if (swapNetwork === 'Solana Mainnet') {
+        // Jupiter: use 1 token (in native units) for the quote
+        const oneLamport = Math.pow(10, swapFromToken.decimals);
+        const inputMint =
+          swapFromToken.mint === null
+            ? JUPITER_SOL_MINT
+            : swapFromToken.apiMint;
+        const outputMint =
+          swapToToken.mint === null ? JUPITER_SOL_MINT : swapToToken.apiMint;
+        const order = await fetchJupiterOrder({
+          inputMint,
+          outputMint,
+          amountLamports: oneLamport,
+        });
+        if (order.errorCode !== null && order.outAmount === 0) {
+          throw new Error(
+            order.errorMessage ?? `Jupiter quote error ${order.errorCode}`,
+          );
+        }
+        rate = order.outAmount / Math.pow(10, swapToToken.decimals);
+      } else {
+        // xDEX
+        const result = await fetchSwapQuote({
+          network: swapNetwork,
+          tokenIn: swapFromToken.apiMint,
+          tokenOut: swapToToken.apiMint,
+          tokenInAmount: 1,
+          isExactAmountIn: true,
+        });
+        rate = result.tokenOutAmount;
+      }
+
+      setSwapQuoteRate(rate);
       // If user has entered an amount, recalculate locally
       if (swapFromAmount && parseFloat(swapFromAmount) > 0) {
         const decimals = Math.min(swapToToken.decimals, 6);
-        const output = result.tokenOutAmount * parseFloat(swapFromAmount);
+        const output = rate * parseFloat(swapFromAmount);
         setSwapToAmount(output.toFixed(decimals));
       }
     } catch (err) {
@@ -390,15 +425,36 @@ function App(): JSX.Element {
         path = accounts[0].derivationPath;
         setDerivationPath(path);
       }
-      const result = await executeSwap({
-        network: swapNetwork,
-        wallet: publicKey,
-        tokenIn: swapFromToken,
-        tokenOut: swapToToken,
-        tokenInAmount: amount,
-        authToken: currentAuthToken,
-        derivationPath: path,
-      });
+      let result;
+      if (swapNetwork === 'Solana Mainnet') {
+        const inputMint =
+          swapFromToken.mint === null
+            ? JUPITER_SOL_MINT
+            : swapFromToken.apiMint;
+        const outputMint =
+          swapToToken.mint === null ? JUPITER_SOL_MINT : swapToToken.apiMint;
+        const amountLamports = Math.round(
+          amount * Math.pow(10, swapFromToken.decimals),
+        );
+        result = await executeJupiterSwap({
+          inputMint,
+          outputMint,
+          amountLamports,
+          taker: publicKey,
+          authToken: currentAuthToken,
+          derivationPath: path,
+        });
+      } else {
+        result = await executeSwap({
+          network: swapNetwork,
+          wallet: publicKey,
+          tokenIn: swapFromToken,
+          tokenOut: swapToToken,
+          tokenInAmount: amount,
+          authToken: currentAuthToken,
+          derivationPath: path,
+        });
+      }
       if (result.success) {
         Alert.alert(
           'Swap Successful',
@@ -711,15 +767,32 @@ function App(): JSX.Element {
     );
   };
 
+  // ── Jupiter search handler ────────────────────────────────────────────────────
+  const handleJupiterSearch = useCallback(async (query: string) => {
+    setJupiterSearchQuery(query);
+    if (!query || query.trim().length < 1) {
+      setJupiterSearchResults([]);
+      return;
+    }
+    setIsSearchingJupiter(true);
+    try {
+      const results = await searchJupiterTokens(query);
+      setJupiterSearchResults(results);
+    } finally {
+      setIsSearchingJupiter(false);
+    }
+  }, []);
+
   // ── Token Selector Modal ─────────────────────────────────────────────────────
   const renderTokenSelectorModal = () => {
     const isFrom = showTokenSelector === 'from';
     const onSelect = isFrom ? handleSelectFromToken : handleSelectToToken;
     const disabledMint = isFrom ? swapToToken?.mint : swapFromToken?.mint;
 
-    // From: use portfolio tokens directly (already loaded, balance > 0 guaranteed).
-    // To:   only show tokens that have an active pool with the selected From token.
+    // Determine if this is a Solana-To selector (Jupiter path)
+    const isJupiterToSelector = !isFrom && swapNetwork === 'Solana Mainnet';
 
+    // From: portfolio tokens (local, balance > 0)
     const fromTokensFromPortfolio: SwapToken[] = tokens
       .filter(p => !p.symbol.includes('LP') && p.rawBalance > 0)
       .map(p => ({
@@ -733,23 +806,36 @@ function App(): JSX.Element {
         decimals: p.decimals,
         network: p.network,
       }));
+
+    // xDEX To list (X1 network)
     const fromApiMint = swapFromToken?.apiMint ?? '';
+    const xdexToTokens = swapTokenList.filter(t => {
+      if (!swapFromToken) {
+        return false;
+      }
+      const candidateApiMint = t.apiMint;
+      return swapPoolList.some(
+        pool =>
+          pool.status === 0 &&
+          ((pool.token1Mint === fromApiMint &&
+            pool.token2Mint === candidateApiMint) ||
+            (pool.token2Mint === fromApiMint &&
+              pool.token1Mint === candidateApiMint)),
+      );
+    });
+
+    // Jupiter To list: search results if query present, else default list
+    const jupiterToTokens = isJupiterToSelector
+      ? jupiterSearchQuery.trim().length > 0
+        ? jupiterSearchResults
+        : JUPITER_DEFAULT_SOL_TOKENS
+      : [];
+
     const filteredTokens = isFrom
       ? fromTokensFromPortfolio
-      : swapTokenList.filter(t => {
-          if (!swapFromToken) {
-            return false;
-          }
-          const candidateApiMint = t.apiMint;
-          return swapPoolList.some(
-            pool =>
-              pool.status === 0 &&
-              ((pool.token1Mint === fromApiMint &&
-                pool.token2Mint === candidateApiMint) ||
-                (pool.token2Mint === fromApiMint &&
-                  pool.token1Mint === candidateApiMint)),
-          );
-        });
+      : isJupiterToSelector
+      ? jupiterToTokens
+      : xdexToTokens;
 
     const x1Tokens = filteredTokens.filter(t => t.network === 'X1');
     const solTokens = filteredTokens.filter(t => t.network === 'Solana');
@@ -759,17 +845,45 @@ function App(): JSX.Element {
         visible={showTokenSelector !== null}
         animationType="slide"
         transparent
-        onRequestClose={() => setShowTokenSelector(null)}>
+        onRequestClose={() => {
+          setShowTokenSelector(null);
+          setJupiterSearchQuery('');
+          setJupiterSearchResults([]);
+        }}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>
                 Select {isFrom ? 'From' : 'To'} Token
               </Text>
-              <TouchableOpacity onPress={() => setShowTokenSelector(null)}>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowTokenSelector(null);
+                  setJupiterSearchQuery('');
+                  setJupiterSearchResults([]);
+                }}>
                 <FontAwesome name="times" size={20} color="#fff" />
               </TouchableOpacity>
             </View>
+
+            {/* Jupiter search box (Solana To only) */}
+            {isJupiterToSelector && (
+              <View style={styles.jupiterSearchContainer}>
+                <FontAwesome name="search" size={14} color="#888" />
+                <TextInput
+                  style={styles.jupiterSearchInput}
+                  placeholder="Search token name, symbol or mint..."
+                  placeholderTextColor="#555"
+                  value={jupiterSearchQuery}
+                  onChangeText={handleJupiterSearch}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {isSearchingJupiter && (
+                  <ActivityIndicator size="small" color="#38B6FF" />
+                )}
+              </View>
+            )}
 
             <FlatList
               data={[
@@ -1471,6 +1585,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 12,
     textAlign: 'center',
+  },
+  jupiterSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 10,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  jupiterSearchInput: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 14,
+    padding: 0,
   },
   swapButton: {
     backgroundColor: '#38B6FF',
