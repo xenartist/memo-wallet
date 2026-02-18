@@ -953,12 +953,20 @@ function App(): JSX.Element {
             </View>
 
             {/* ── Exchange Rate ── */}
-            {swapFromToken && swapToToken && swapQuoteRate && (
-              <Text style={styles.exchangeRateText}>
-                1 {swapFromToken.symbol} = {swapQuoteRate.toFixed(4)}{' '}
-                {swapToToken.symbol}
-              </Text>
-            )}
+            {swapFromToken &&
+              swapToToken &&
+              (isLoadingQuote ? (
+                <ActivityIndicator size="small" color="#38B6FF" />
+              ) : swapQuoteRate ? (
+                <Text style={styles.exchangeRateText}>
+                  1 {swapFromToken.symbol} = {swapQuoteRate.toFixed(4)}{' '}
+                  {swapToToken.symbol}
+                </Text>
+              ) : (
+                <Text style={styles.noPoolText}>
+                  No liquidity pool found for this pair
+                </Text>
+              ))}
 
             {/* ── Swap Button ── */}
             <TouchableOpacity
@@ -1454,6 +1462,12 @@ const styles = StyleSheet.create({
   },
   exchangeRateText: {
     color: '#888',
+    fontSize: 12,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  noPoolText: {
+    color: '#ff6b6b',
     fontSize: 12,
     marginTop: 12,
     textAlign: 'center',
