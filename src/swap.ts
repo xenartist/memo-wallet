@@ -550,7 +550,6 @@ export interface ExecuteSwapParams {
   tokenIn: SwapToken;
   tokenOut: SwapToken;
   tokenInAmount: number; // human-readable (e.g. 1.5 XNT)
-  slippagePercent: number;
   authToken: number;
   derivationPath: string;
 }
@@ -734,25 +733,4 @@ async function _signAndSendSerializedTx(
 export async function getLatestBlockhashLegacy(): Promise<string> {
   const result = await rpcCall('getLatestBlockhash');
   return result.value.blockhash;
-}
-
-export function calculateMinimumOutput(
-  amountInLamports: number,
-  inputDecimals: number,
-  outputDecimals: number,
-  poolPrice: PoolPrice,
-  inputMint: string,
-  slippagePercent: number,
-): number {
-  const amountInTokens = amountInLamports / Math.pow(10, inputDecimals);
-
-  let estimatedOutputTokens: number;
-  if (inputMint === poolPrice.token_0_mint) {
-    estimatedOutputTokens = amountInTokens * poolPrice.price;
-  } else {
-    estimatedOutputTokens = amountInTokens / poolPrice.price;
-  }
-
-  const minimumOutput = estimatedOutputTokens * (1 - slippagePercent / 100);
-  return Math.floor(minimumOutput * Math.pow(10, outputDecimals));
 }

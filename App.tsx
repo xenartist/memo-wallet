@@ -78,9 +78,6 @@ function App(): JSX.Element {
   const [isLoadingSwapTokens, setIsLoadingSwapTokens] = useState(false);
   const [isLoadingQuote, setIsLoadingQuote] = useState(false);
   const [isExecutingSwap, setIsExecutingSwap] = useState(false);
-  const [slippage, setSlippage] = useState<number>(0.5);
-  const [showSlippageModal, setShowSlippageModal] = useState(false);
-  const [customSlippage, setCustomSlippage] = useState<string>('');
   const [showTokenSelector, setShowTokenSelector] = useState<
     'from' | 'to' | null
   >(null);
@@ -113,15 +110,24 @@ function App(): JSX.Element {
       try {
         const swapToks = await getSwapTokens(publicKey, swapNetwork);
         setSwapTokenList(swapToks);
-        // Default from: first token with balance
+        // Default from: XNT
         if (swapToks.length >= 1 && !swapFromToken) {
-          setSwapFromToken(swapToks[0]);
+          const xntToken = swapToks.find(t => t.symbol === 'XNT');
+          setSwapFromToken(xntToken || swapToks[0]);
         }
-        // Default to: first token that is different from from token
+        // Default to: MEMO
         if (swapToks.length >= 1 && !swapToToken) {
-          const toDefault = swapToks.find(t => t.mint !== swapToks[0]?.mint);
-          if (toDefault) {
-            setSwapToToken(toDefault);
+          const memoToken = swapToks.find(t => t.symbol === 'MEMO');
+          if (memoToken) {
+            setSwapToToken(memoToken);
+          } else {
+            // Fallback: first token that is different from from token
+            const toDefault = swapToks.find(
+              t => t.mint !== (swapFromToken?.mint ?? swapToks[0]?.mint),
+            );
+            if (toDefault) {
+              setSwapToToken(toDefault);
+            }
           }
         }
       } catch (err) {
@@ -378,8 +384,6 @@ function App(): JSX.Element {
         tokenIn: swapFromToken,
         tokenOut: swapToToken,
         tokenInAmount: amount,
-        slippagePercent:
-          slippage < 0 ? parseFloat(customSlippage) || 0.5 : slippage,
         authToken: currentAuthToken,
         derivationPath: path,
       });
@@ -795,9 +799,6 @@ function App(): JSX.Element {
       parseFloat(swapFromAmount) > 0 &&
       !isExecutingSwap;
 
-    const currentSlippage =
-      slippage < 0 ? parseFloat(customSlippage) || 0.5 : slippage;
-
     return (
       <View style={styles.screenContainer}>
         {renderTokenSelectorModal()}
@@ -809,8 +810,18 @@ function App(): JSX.Element {
             <FontAwesome name="arrow-left" size={20} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.screenTitle}>Swap</Text>
-          {/* Spacer to balance the header */}
-          <View style={{width: 50}} />
+          {/* Network badge on the right */}
+          <View
+            style={[
+              styles.networkBadgePill,
+              swapNetwork === 'X1 Mainnet'
+                ? styles.networkBadgePillX1
+                : styles.networkBadgePillSol,
+            ]}>
+            <Text style={styles.networkBadgePillText}>
+              {swapNetwork === 'X1 Mainnet' ? 'X1' : 'SOL'}
+            </Text>
+          </View>
         </View>
 
         {isLoadingSwapTokens ? (
@@ -820,29 +831,6 @@ function App(): JSX.Element {
           </View>
         ) : (
           <View style={styles.swapContent}>
-            {/* ── Header with Network & Slippage ── */}
-            <View style={styles.swapHeader}>
-              <View
-                style={[
-                  styles.networkBadgePill,
-                  swapNetwork === 'X1 Mainnet'
-                    ? styles.networkBadgePillX1
-                    : styles.networkBadgePillSol,
-                ]}>
-                <Text style={styles.networkBadgePillText}>
-                  {swapNetwork === 'X1 Mainnet' ? 'X1' : 'SOL'}
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.slippageButtonLarge}
-                onPress={() => setShowSlippageModal(!showSlippageModal)}>
-                <Text style={styles.slippageButtonLargeText}>
-                  Slippage: {currentSlippage}%
-                </Text>
-                <FontAwesome name="gear" size={16} color="#888" />
-              </TouchableOpacity>
-            </View>
-
             {/* ── From ── */}
             <View style={styles.swapCard}>
               <Text style={styles.tokenLabel}>From</Text>
@@ -924,48 +912,6 @@ function App(): JSX.Element {
                 1 {swapFromToken.symbol} = {swapQuoteRate.toFixed(4)}{' '}
                 {swapToToken.symbol}
               </Text>
-            )}
-
-            {/* ── Slippage Modal (appears when clicked) ── */}
-            {showSlippageModal && (
-              <View style={styles.slippageModal}>
-                {[0.5, 1, 2, 5].map(value => (
-                  <TouchableOpacity
-                    key={value}
-                    style={[
-                      styles.slippageOption,
-                      slippage === value && styles.slippageOptionActive,
-                    ]}
-                    onPress={() => {
-                      setSlippage(value);
-                      setShowSlippageModal(false);
-                    }}>
-                    <Text
-                      style={[
-                        styles.slippageOptionText,
-                        slippage === value && styles.slippageOptionTextActive,
-                      ]}>
-                      {value}%
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-                <View style={styles.slippageCustomRow}>
-                  <Text style={styles.slippageCustomLabel}>Custom:</Text>
-                  <TextInput
-                    style={styles.slippageCustomInput}
-                    value={customSlippage}
-                    onChangeText={text => {
-                      setCustomSlippage(text);
-                      setSlippage(-1);
-                    }}
-                    onEndEditing={() => setShowSlippageModal(false)}
-                    placeholder="0"
-                    placeholderTextColor="#555"
-                    keyboardType="decimal-pad"
-                  />
-                  <Text style={styles.slippageCustomLabel}>%</Text>
-                </View>
-              </View>
             )}
 
             {/* ── Swap Button ── */}
@@ -1365,15 +1311,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 4,
   },
-  slippageButtonSmall: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  slippageButtonSmallText: {
-    color: '#888',
-    fontSize: 12,
-  },
   tokenSelector: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1467,83 +1404,10 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
   },
-  slippageRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 8,
-    paddingHorizontal: 8,
-  },
-  slippageLabel: {
-    color: '#888',
-    fontSize: 14,
-  },
-  slippageButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#333',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  slippageButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    marginRight: 4,
-  },
-  slippageModal: {
-    backgroundColor: '#222',
-    borderRadius: 8,
-    marginBottom: 8,
-    padding: 8,
-  },
-  slippageOption: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-  },
-  slippageOptionActive: {
-    backgroundColor: '#38B6FF',
-  },
-  slippageOptionText: {
-    color: '#fff',
-    fontSize: 16,
-  },
-  slippageOptionTextActive: {
-    color: '#000',
-    fontWeight: 'bold',
-  },
-  slippageCustomRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#444',
-  },
-  slippageCustomLabel: {
-    color: '#888',
-    fontSize: 14,
-    marginRight: 8,
-  },
   exchangeRateText: {
     color: '#888',
     fontSize: 12,
-  },
-  rateSlippageRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  slippageCustomInput: {
-    backgroundColor: '#333',
-    color: '#fff',
-    fontSize: 14,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    width: 60,
+    marginTop: 12,
     textAlign: 'center',
   },
   swapButton: {
@@ -1661,32 +1525,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  // ── Network badge pill in swap header ────────────────────────────────────
+  // ── Network badge pill ────────────────────────────────────
   networkBadgePill: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
-  },
-  swapHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-    paddingHorizontal: 4,
-  },
-  slippageButtonLarge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#333',
-    borderRadius: 8,
-  },
-  slippageButtonLargeText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
   },
   networkBadgePillX1: {
     backgroundColor: '#38B6FF22',
