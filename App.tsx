@@ -963,8 +963,10 @@ function App(): JSX.Element {
                   setShowTokenSelector(null);
                   setJupiterSearchQuery('');
                   setJupiterSearchResults([]);
-                }}>
-                <FontAwesome name="times" size={20} color="#fff" />
+                }}
+                style={styles.modalCloseButton}
+                hitSlop={{top: 12, bottom: 12, left: 12, right: 12}}>
+                <FontAwesome name="times" size={22} color="#fff" />
               </TouchableOpacity>
             </View>
 
@@ -1282,7 +1284,9 @@ function App(): JSX.Element {
                     ? 'Select Tokens'
                     : !swapFromAmount || parseFloat(swapFromAmount) <= 0
                     ? 'Enter Amount'
-                    : 'Swap'}
+                    : swapNetwork === 'Solana Mainnet'
+                    ? 'Swap on Solana'
+                    : 'Swap on X1'}
                 </Text>
               )}
             </TouchableOpacity>
@@ -1864,6 +1868,9 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
+  },
+  modalCloseButton: {
+    padding: 8,
   },
   tokenFlatList: {
     flex: 1,
