@@ -955,13 +955,15 @@ function App(): JSX.Element {
         {!connected ? (
           renderLoginScreen()
         ) : activeTab === 'swap' ? (
-          <ScrollView
-            style={styles.swapScrollView}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.swapScrollContent}>
-            {renderContent()}
+          <View style={styles.swapScrollView}>
+            <ScrollView
+              style={styles.swapScrollView}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.swapScrollContent}>
+              {renderContent()}
+            </ScrollView>
             {renderBottomNav()}
-          </ScrollView>
+          </View>
         ) : (
           <View style={styles.walletWrapper}>
             {renderContent()}
