@@ -51,6 +51,7 @@ function App(): JSX.Element {
       icon_uri: 'https://app.xdex.xyz/assets/images/tokens/x1.webp',
       decimals: 9,
       rawBalance: 0,
+      volume_usd: 0,
     },
     {
       symbol: 'SOL',
@@ -61,6 +62,7 @@ function App(): JSX.Element {
       icon_uri: null,
       decimals: 9,
       rawBalance: 0,
+      volume_usd: 0,
     },
   ]);
   const [refreshing, setRefreshing] = useState(false);
@@ -165,11 +167,12 @@ function App(): JSX.Element {
     try {
       const allTokens = await fetchAllTokens(pk);
       setTokens(allTokens);
-      // Set main balance from XNT (first native token)
-      const xntToken = allTokens.find(
-        t => t.symbol === 'XNT' && t.network === 'X1',
+      // Calculate total USD value from all tokens
+      const totalUsd = allTokens.reduce(
+        (sum, t) => sum + (t.volume_usd || 0),
+        0,
       );
-      setBalance(xntToken ? xntToken.balance : '0.00');
+      setBalance(totalUsd.toFixed(2));
     } catch (error) {
       console.error('Failed to fetch balances:', error);
       setBalance('Failed to fetch');
@@ -503,7 +506,7 @@ function App(): JSX.Element {
 
       <View style={styles.balanceCard}>
         <Text style={styles.balanceLabel}>Total Balance</Text>
-        <Text style={styles.balanceValue}>{balance} XNT</Text>
+        <Text style={styles.balanceValue}>${balance}</Text>
       </View>
 
       <View style={styles.actionRow}>
@@ -575,8 +578,10 @@ function App(): JSX.Element {
               <Text style={styles.tokenName}>{token.name}</Text>
             </View>
             <View style={styles.tokenBalance}>
+              <Text style={styles.tokenBalanceUsd}>
+                ${token.volume_usd.toFixed(2)}
+              </Text>
               <Text style={styles.tokenBalanceText}>{token.balance}</Text>
-              <Text style={styles.tokenBalanceUsd}>{token.symbol}</Text>
             </View>
           </View>
         ))}
@@ -871,27 +876,6 @@ function App(): JSX.Element {
                     )
                   : '—'}
               </Text>
-
-              {/* Percent buttons */}
-              <View style={styles.percentButtons}>
-                {[25, 50, 75, 100].map(pct => (
-                  <TouchableOpacity
-                    key={pct}
-                    style={styles.percentButton}
-                    onPress={() => {
-                      if (!swapFromToken || swapFromToken.balance <= 0) {
-                        return;
-                      }
-                      const amt = (swapFromToken.balance * pct) / 100;
-                      const dec = Math.min(swapFromToken.decimals, 6);
-                      const str = amt.toFixed(dec);
-                      setSwapFromAmount(str);
-                      calculateOutputAmount(str);
-                    }}>
-                    <Text style={styles.percentButtonText}>{pct}%</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
             </View>
 
             {/* ── Direction button ── */}
@@ -1277,13 +1261,13 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   tokenBalanceText: {
+    color: '#888',
+    fontSize: 12,
+  },
+  tokenBalanceUsd: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-  },
-  tokenBalanceUsd: {
-    color: '#888',
-    fontSize: 12,
   },
   bottomNav: {
     flexDirection: 'row',

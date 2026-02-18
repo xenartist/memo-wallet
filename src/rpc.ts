@@ -139,6 +139,7 @@ export interface XDEXToken {
   name: string;
   imageUrl: string;
   is_lp_token: boolean;
+  volume_usd: number;
 }
 
 interface XDEXApiResponse {

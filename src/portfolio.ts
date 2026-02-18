@@ -13,6 +13,7 @@ export interface PortfolioToken {
   icon_uri: string | null;
   decimals: number;
   rawBalance: number;
+  volume_usd: number;
 }
 
 // ==================== Constants ====================
@@ -31,6 +32,7 @@ function xdexTokenToPortfolioToken(
     symbol: string;
     name: string;
     imageUrl: string;
+    volume_usd: number;
   },
   network: 'X1' | 'Solana',
 ): PortfolioToken {
@@ -44,6 +46,7 @@ function xdexTokenToPortfolioToken(
     icon_uri: xdexToken.imageUrl,
     decimals: xdexToken.decimals,
     rawBalance: balanceNum,
+    volume_usd: xdexToken.volume_usd,
   };
 }
 
