@@ -131,27 +131,45 @@ function App(): JSX.Element {
         setSwapTokenList(swapToks);
         setSwapPoolList(swapPools);
         // Default from: XNT (must have balance)
+        let resolvedFrom = swapFromToken;
         if (swapToks.length >= 1 && !swapFromToken) {
           const xntToken = swapToks.find(
             t => t.symbol === 'XNT' && t.balance > 0,
           );
-          setSwapFromToken(
-            xntToken || swapToks.find(t => t.balance > 0) || null,
-          );
+          resolvedFrom = xntToken || swapToks.find(t => t.balance > 0) || null;
+          setSwapFromToken(resolvedFrom);
         }
-        // Default to: MEMO
+        // Default to token based on from token
         if (swapToks.length >= 1 && !swapToToken) {
-          const memoToken = swapToks.find(t => t.symbol === 'MEMO');
-          if (memoToken) {
-            setSwapToToken(memoToken);
-          } else {
-            // Fallback: first token that is different from from token
-            const toDefault = swapToks.find(
-              t => t.mint !== (swapFromToken?.mint ?? swapToks[0]?.mint),
-            );
-            if (toDefault) {
-              setSwapToToken(toDefault);
+          let toDefault: SwapToken | undefined;
+          const currentFrom = resolvedFrom;
+          if (swapNetwork === 'Solana Mainnet') {
+            // Solana: SOL → solXEN, other → SOL
+            if (currentFrom?.symbol === 'SOL') {
+              toDefault = JUPITER_DEFAULT_SOL_TOKENS.find(
+                t => t.symbol === 'solXEN',
+              );
+            } else {
+              toDefault = JUPITER_DEFAULT_SOL_TOKENS.find(
+                t => t.symbol === 'SOL',
+              );
             }
+          } else {
+            // X1: XNT → MEMO, other → XNT
+            if (currentFrom?.symbol === 'XNT') {
+              toDefault = swapToks.find(t => t.symbol === 'MEMO');
+            } else {
+              toDefault = swapToks.find(t => t.symbol === 'XNT');
+            }
+            // Fallback: first token different from from token
+            if (!toDefault) {
+              toDefault = swapToks.find(
+                t => t.mint !== (currentFrom?.mint ?? swapToks[0]?.mint),
+              );
+            }
+          }
+          if (toDefault) {
+            setSwapToToken(toDefault);
           }
         }
       } catch (err) {
@@ -376,12 +394,53 @@ function App(): JSX.Element {
   };
 
   const handleSelectFromToken = (token: SwapToken) => {
+    const newNetwork = token.network === 'X1' ? 'X1 Mainnet' : 'Solana Mainnet';
+    const previousNetwork = swapFromToken?.network;
+    const networkChanged = previousNetwork && previousNetwork !== token.network;
+
     setSwapFromToken(token);
-    setSwapNetwork(token.network === 'X1' ? 'X1 Mainnet' : 'Solana Mainnet');
-    // Clear to-token if it's same as newly selected from-token
-    if (swapToToken?.mint === token.mint) {
-      setSwapToToken(null);
+    setSwapNetwork(newNetwork);
+
+    // If network changed, auto-select appropriate To token
+    if (networkChanged) {
+      if (token.network === 'X1') {
+        // Switched from Solana → X1
+        if (token.symbol === 'XNT') {
+          // From = XNT → To = MEMO
+          const memoToken = swapTokenList.find(
+            t => t.symbol === 'MEMO' && t.network === 'X1',
+          );
+          setSwapToToken(memoToken || null);
+        } else {
+          // From = other X1 token → To = XNT
+          const xntToken = swapTokenList.find(
+            t => t.symbol === 'XNT' && t.network === 'X1',
+          );
+          setSwapToToken(xntToken || null);
+        }
+      } else {
+        // Switched from X1 → Solana
+        if (token.symbol === 'SOL') {
+          // From = SOL → To = solXEN
+          const solXENToken = JUPITER_DEFAULT_SOL_TOKENS.find(
+            t => t.symbol === 'solXEN',
+          );
+          setSwapToToken(solXENToken || null);
+        } else {
+          // From = other Solana token → To = SOL
+          const solToken = JUPITER_DEFAULT_SOL_TOKENS.find(
+            t => t.symbol === 'SOL',
+          );
+          setSwapToToken(solToken || null);
+        }
+      }
+    } else {
+      // Same network, only clear if same mint
+      if (swapToToken?.mint === token.mint) {
+        setSwapToToken(null);
+      }
     }
+
     setSwapFromAmount('');
     setSwapToAmount('');
     setShowTokenSelector(null);
@@ -789,11 +848,14 @@ function App(): JSX.Element {
     size: number = 36,
   ) => {
     return (
-      <View style={{position: 'relative', width: size, height: size}}>
+      <View style={[styles.tokenIconContainer, {width: size, height: size}]}>
         {token?.logo ? (
           <Image
             source={{uri: token.logo}}
-            style={{width: size, height: size, borderRadius: size / 2}}
+            style={[
+              styles.tokenSelectorIcon,
+              {width: size, height: size, borderRadius: size / 2},
+            ]}
           />
         ) : (
           <View
@@ -827,7 +889,7 @@ function App(): JSX.Element {
   const renderTokenSelectorModal = () => {
     const isFrom = showTokenSelector === 'from';
     const onSelect = isFrom ? handleSelectFromToken : handleSelectToToken;
-    const disabledMint = isFrom ? swapToToken?.mint : swapFromToken?.mint;
+    const disabledToken = isFrom ? swapToToken : swapFromToken;
 
     // Determine if this is a Solana-To selector (Jupiter path)
     const isJupiterToSelector = !isFrom && swapNetwork === 'Solana Mainnet';
@@ -954,7 +1016,9 @@ function App(): JSX.Element {
                   );
                 }
                 const t: SwapToken = item.token;
-                const disabled = t.mint === disabledMint;
+                const disabled =
+                  t.mint === disabledToken?.mint &&
+                  t.network === disabledToken?.network;
                 return (
                   <TouchableOpacity
                     style={[
@@ -1204,7 +1268,9 @@ function App(): JSX.Element {
             <TouchableOpacity
               style={[
                 styles.swapButton,
-                {backgroundColor: canSwap ? accentColor : '#333'},
+                canSwap
+                  ? {backgroundColor: accentColor}
+                  : styles.swapButtonDisabled,
               ]}
               disabled={!canSwap}
               onPress={handleExecuteSwap}>
@@ -1465,6 +1531,9 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  tokenSelectorIcon: {
+    backgroundColor: 'transparent',
   },
   networkBadge: {
     position: 'absolute',
