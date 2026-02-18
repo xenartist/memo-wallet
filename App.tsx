@@ -952,6 +952,8 @@ function App(): JSX.Element {
         ? 'https://explorer.solana.com/tx/'
         : 'https://explorer.mainnet.x1.xyz/tx/';
     const explorerUrl = `${explorerBaseUrl}${txId}`;
+    const accentColor =
+      swapNetwork === 'Solana Mainnet' ? '#9945FF' : '#38B6FF';
 
     const copyToClipboard = (text: string, label: string) => {
       Clipboard.setString(text);
@@ -981,7 +983,7 @@ function App(): JSX.Element {
                 <TouchableOpacity
                   onPress={() => copyToClipboard(txId, 'Transaction ID')}
                   style={styles.swapSuccessCopyBtn}>
-                  <FontAwesome name="copy" size={16} color="#38B6FF" />
+                  <FontAwesome name="copy" size={16} color={accentColor} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -996,14 +998,17 @@ function App(): JSX.Element {
                 <TouchableOpacity
                   onPress={() => copyToClipboard(explorerUrl, 'Explorer URL')}
                   style={styles.swapSuccessCopyBtn}>
-                  <FontAwesome name="copy" size={16} color="#38B6FF" />
+                  <FontAwesome name="copy" size={16} color={accentColor} />
                 </TouchableOpacity>
               </View>
             </View>
 
             {/* Close Button */}
             <TouchableOpacity
-              style={styles.swapSuccessCloseBtn}
+              style={[
+                styles.swapSuccessCloseBtn,
+                {backgroundColor: accentColor},
+              ]}
               onPress={() => setSwapSuccessModalVisible(false)}>
               <Text style={styles.swapSuccessCloseBtnText}>Close</Text>
             </TouchableOpacity>
@@ -1015,6 +1020,10 @@ function App(): JSX.Element {
 
   // ── Swap Screen ───────────────────────────────────────────────────────────────
   const renderSwapScreen = () => {
+    // Accent color based on network: blue for X1, purple for Solana
+    const accentColor =
+      swapNetwork === 'Solana Mainnet' ? '#9945FF' : '#38B6FF';
+
     const canSwap =
       !!swapFromToken &&
       !!swapToToken &&
@@ -1096,7 +1105,7 @@ function App(): JSX.Element {
             <TouchableOpacity
               style={styles.swapDirectionButton}
               onPress={handleSwapDirection}>
-              <FontAwesome name="arrow-down" size={16} color="#38B6FF" />
+              <FontAwesome name="arrow-down" size={16} color={accentColor} />
             </TouchableOpacity>
 
             {/* ── To ── */}
@@ -1153,7 +1162,10 @@ function App(): JSX.Element {
 
             {/* ── Swap Button ── */}
             <TouchableOpacity
-              style={[styles.swapButton, !canSwap && styles.swapButtonDisabled]}
+              style={[
+                styles.swapButton,
+                {backgroundColor: canSwap ? accentColor : '#333'},
+              ]}
               disabled={!canSwap}
               onPress={handleExecuteSwap}>
               {isExecutingSwap ? (
