@@ -33,6 +33,7 @@ import {
   executeSwap,
   toApiMint,
   toPrepareTokenInMint,
+  NATIVE_MINT,
   JUPITER_SOL_MINT,
   JUPITER_DEFAULT_SOL_TOKENS,
   fetchJupiterDefaultSolTokens,
@@ -41,6 +42,31 @@ import {
   executeJupiterSwap,
 } from './src/swap';
 import {fetchAllTokens, PortfolioToken} from './src/portfolio';
+
+// Default swap tokens shown immediately on first load (balance filled in after API loads)
+const MEMO_MINT = 'memoX1sJsBY6od7CfQ58XooRALwnocAZen4L7mW1ick';
+const DEFAULT_FROM_TOKEN: SwapToken = {
+  mint: NATIVE_MINT,
+  apiMint: toApiMint(NATIVE_MINT),
+  prepareApiMint: toPrepareTokenInMint(NATIVE_MINT),
+  symbol: 'XNT',
+  name: 'XNT',
+  logo: 'https://app.xdex.xyz/assets/images/tokens/x1.webp',
+  balance: 0,
+  decimals: 9,
+  network: 'X1',
+};
+const DEFAULT_TO_TOKEN: SwapToken = {
+  mint: MEMO_MINT,
+  apiMint: MEMO_MINT,
+  prepareApiMint: MEMO_MINT,
+  symbol: 'MEMO',
+  name: 'MEMO',
+  logo: 'https://raw.githubusercontent.com/xenartist/memo-token/refs/heads/main/metadata/memo_token-logo.png',
+  balance: 0,
+  decimals: 6,
+  network: 'X1',
+};
 
 function App(): JSX.Element {
   const [connected, setConnected] = useState(false);
@@ -83,8 +109,12 @@ function App(): JSX.Element {
   );
   const [swapTokenList, setSwapTokenList] = useState<SwapToken[]>([]);
   const [swapPoolList, setSwapPoolList] = useState<PoolPair[]>([]);
-  const [swapFromToken, setSwapFromToken] = useState<SwapToken | null>(null);
-  const [swapToToken, setSwapToToken] = useState<SwapToken | null>(null);
+  const [swapFromToken, setSwapFromToken] = useState<SwapToken | null>(
+    DEFAULT_FROM_TOKEN,
+  );
+  const [swapToToken, setSwapToToken] = useState<SwapToken | null>(
+    DEFAULT_TO_TOKEN,
+  );
   const [swapFromAmount, setSwapFromAmount] = useState('');
   const [swapToAmount, setSwapToAmount] = useState('');
   const [swapQuoteRate, setSwapQuoteRate] = useState<number | null>(null); // tokenOutAmount per tokenIn
@@ -106,6 +136,19 @@ function App(): JSX.Element {
   const [fromSearchQuery, setFromSearchQuery] = useState('');
   const [swapSuccessModalVisible, setSwapSuccessModalVisible] = useState(false);
   const [swapSuccessTxId, setSwapSuccessTxId] = useState('');
+
+  // Look up balance for a swap token from the already-loaded portfolio data.
+  // Matching is done via apiMint (normalises native variants) + network.
+  // Returns 0 if the token is not in the portfolio.
+  const balanceFromPortfolio = useCallback(
+    (apiMint: string, network: 'X1' | 'Solana'): number => {
+      const found = tokens.find(
+        p => toApiMint(p.mint) === apiMint && p.network === network,
+      );
+      return found?.rawBalance ?? 0;
+    },
+    [tokens],
+  );
 
   useEffect(() => {
     const initAuth = async () => {
@@ -132,7 +175,8 @@ function App(): JSX.Element {
     const loadTokens = async () => {
       setIsLoadingSwapTokens(true);
       try {
-        // Fetch X1/Solana wallet tokens and Solana default list in parallel
+        // Fetch token/pool list and Solana default list in parallel (background)
+        // Balance is taken from portfolio — API balance is ignored
         const [{tokens: swapToks, pools: swapPools}, solDefaults] =
           await Promise.all([
             getSwapTokens(publicKey, swapNetwork),
@@ -141,44 +185,6 @@ function App(): JSX.Element {
         setSwapTokenList(swapToks);
         setSwapPoolList(swapPools);
         setSolanaDefaultTokens(solDefaults);
-        // Default from: XNT (must have balance)
-        let resolvedFrom = swapFromToken;
-        if (swapToks.length >= 1 && !swapFromToken) {
-          const xntToken = swapToks.find(
-            t => t.symbol === 'XNT' && t.balance > 0,
-          );
-          resolvedFrom = xntToken || swapToks.find(t => t.balance > 0) || null;
-          setSwapFromToken(resolvedFrom);
-        }
-        // Default to token based on from token
-        if (swapToks.length >= 1 && !swapToToken) {
-          let toDefault: SwapToken | undefined;
-          const currentFrom = resolvedFrom;
-          if (swapNetwork === 'Solana Mainnet') {
-            // Solana: SOL → solXEN, other → SOL
-            if (currentFrom?.symbol === 'SOL') {
-              toDefault = solDefaults.find(t => t.symbol === 'solXEN');
-            } else {
-              toDefault = solDefaults.find(t => t.symbol === 'SOL');
-            }
-          } else {
-            // X1: XNT → MEMO, other → XNT
-            if (currentFrom?.symbol === 'XNT') {
-              toDefault = swapToks.find(t => t.symbol === 'MEMO');
-            } else {
-              toDefault = swapToks.find(t => t.symbol === 'XNT');
-            }
-            // Fallback: first token different from from token
-            if (!toDefault) {
-              toDefault = swapToks.find(
-                t => t.mint !== (currentFrom?.mint ?? swapToks[0]?.mint),
-              );
-            }
-          }
-          if (toDefault) {
-            setSwapToToken(toDefault);
-          }
-        }
       } catch (err) {
         console.error('[App] Failed to load swap tokens:', err);
       } finally {
@@ -186,8 +192,30 @@ function App(): JSX.Element {
       }
     };
     loadTokens();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected, publicKey, swapNetwork, activeTab]);
+
+  // Sync swap token balances from portfolio whenever portfolio data changes.
+  // This is instant — no API call needed.
+  useEffect(() => {
+    setSwapFromToken(prev => {
+      if (!prev) {
+        return DEFAULT_FROM_TOKEN;
+      }
+      return {
+        ...prev,
+        balance: balanceFromPortfolio(prev.apiMint, prev.network),
+      };
+    });
+    setSwapToToken(prev => {
+      if (!prev) {
+        return DEFAULT_TO_TOKEN;
+      }
+      return {
+        ...prev,
+        balance: balanceFromPortfolio(prev.apiMint, prev.network),
+      };
+    });
+  }, [tokens, balanceFromPortfolio]);
 
   const checkAndRequestPermission = async (): Promise<boolean> => {
     if (Platform.OS !== 'android') {
@@ -1259,156 +1287,147 @@ function App(): JSX.Element {
           </View>
         </View>
 
-        {isLoadingSwapTokens ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#38B6FF" />
-            <Text style={styles.loadingText}>Loading tokens...</Text>
-          </View>
-        ) : (
-          <View style={styles.swapContent}>
-            {/* ── From ── */}
-            <View
-              style={[
-                styles.swapCard,
-                swapFromToken?.network === 'Solana'
-                  ? styles.swapCardSolana
-                  : styles.swapCardX1,
-              ]}>
-              <Text style={styles.tokenLabel}>From</Text>
-              <View style={styles.tokenRow}>
-                <TouchableOpacity
-                  style={styles.tokenSelector}
-                  onPress={() => {
-                    if (isLoadingSwapTokens) {
-                      return;
-                    }
-                    const net = swapFromToken?.network;
-                    setFromSelectorTab(
-                      net === 'X1' || net === 'Solana' ? net : 'X1',
-                    );
-                    setFromSearchQuery('');
-                    setShowTokenSelector('from');
-                  }}
-                  disabled={isLoadingSwapTokens}>
-                  {renderTokenIcon(swapFromToken)}
-                  <Text style={styles.swapTokenSymbol}>
-                    {swapFromToken?.symbol ?? 'Select'}
-                  </Text>
-                  <FontAwesome name="chevron-down" size={12} color="#888" />
-                </TouchableOpacity>
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    style={styles.amountInput}
-                    value={swapFromAmount}
-                    onChangeText={handleFromAmountChange}
-                    placeholder="0.00"
-                    placeholderTextColor="#888"
-                    keyboardType="decimal-pad"
-                    editable={!isExecutingSwap}
-                  />
-                </View>
-              </View>
-              <Text style={styles.swapBalanceLabel}>
-                Balance:{' '}
-                {swapFromToken
-                  ? swapFromToken.balance.toFixed(
-                      Math.min(swapFromToken.decimals, 4),
-                    )
-                  : '—'}
-              </Text>
-            </View>
-
-            {/* ── Direction button ── */}
-            <TouchableOpacity
-              style={styles.swapDirectionButton}
-              onPress={handleSwapDirection}>
-              <FontAwesome name="arrow-down" size={16} color={accentColor} />
-            </TouchableOpacity>
-
-            {/* ── To ── */}
-            <View
-              style={[
-                styles.swapCard,
-                swapToToken?.network === 'Solana'
-                  ? styles.swapCardSolana
-                  : styles.swapCardX1,
-              ]}>
-              <Text style={styles.tokenLabel}>To</Text>
-              <View style={styles.tokenRow}>
-                <TouchableOpacity
-                  style={styles.tokenSelector}
-                  onPress={() =>
-                    !isLoadingSwapTokens && setShowTokenSelector('to')
+        <View style={styles.swapContent}>
+          {/* ── From ── */}
+          <View
+            style={[
+              styles.swapCard,
+              swapFromToken?.network === 'Solana'
+                ? styles.swapCardSolana
+                : styles.swapCardX1,
+            ]}>
+            <Text style={styles.tokenLabel}>From</Text>
+            <View style={styles.tokenRow}>
+              <TouchableOpacity
+                style={styles.tokenSelector}
+                onPress={() => {
+                  if (isLoadingSwapTokens) {
+                    return;
                   }
-                  disabled={isLoadingSwapTokens}>
-                  {renderTokenIcon(swapToToken)}
-                  <Text style={styles.swapTokenSymbol}>
-                    {swapToToken?.symbol ?? 'Select'}
-                  </Text>
-                  <FontAwesome name="chevron-down" size={12} color="#888" />
-                </TouchableOpacity>
-                <View style={styles.inputContainer}>
-                  {isLoadingQuote ? (
-                    <ActivityIndicator size="small" color="#38B6FF" />
-                  ) : (
-                    <Text style={styles.outputAmount}>
-                      {swapToAmount || '0.00'}
-                    </Text>
-                  )}
-                </View>
+                  const net = swapFromToken?.network;
+                  setFromSelectorTab(
+                    net === 'X1' || net === 'Solana' ? net : 'X1',
+                  );
+                  setFromSearchQuery('');
+                  setShowTokenSelector('from');
+                }}
+                disabled={isLoadingSwapTokens}>
+                {renderTokenIcon(swapFromToken)}
+                <Text style={styles.swapTokenSymbol}>
+                  {swapFromToken?.symbol ?? 'Select'}
+                </Text>
+                <FontAwesome name="chevron-down" size={12} color="#888" />
+              </TouchableOpacity>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.amountInput}
+                  value={swapFromAmount}
+                  onChangeText={handleFromAmountChange}
+                  placeholder="0.00"
+                  placeholderTextColor="#888"
+                  keyboardType="decimal-pad"
+                  editable={!isExecutingSwap}
+                />
               </View>
-              <Text style={styles.swapBalanceLabel}>
-                Balance:{' '}
-                {swapToToken
-                  ? swapToToken.balance.toFixed(
-                      Math.min(swapToToken.decimals, 4),
-                    )
-                  : '—'}
-              </Text>
             </View>
-
-            {/* ── Exchange Rate ── */}
-            {swapFromToken &&
-              swapToToken &&
-              (isLoadingQuote ? (
-                <ActivityIndicator size="small" color="#38B6FF" />
-              ) : swapQuoteRate ? (
-                <Text style={styles.exchangeRateText}>
-                  1 {swapFromToken.symbol} = {swapQuoteRate.toFixed(4)}{' '}
-                  {swapToToken.symbol}
-                </Text>
-              ) : (
-                <Text style={styles.noPoolText}>
-                  No liquidity pool found for this pair
-                </Text>
-              ))}
-
-            {/* ── Swap Button ── */}
-            <TouchableOpacity
-              style={[
-                styles.swapButton,
-                canSwap
-                  ? {backgroundColor: accentColor}
-                  : styles.swapButtonDisabled,
-              ]}
-              disabled={!canSwap}
-              onPress={handleExecuteSwap}>
-              {isExecutingSwap ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.swapButtonText}>
-                  {!swapFromToken || !swapToToken
-                    ? 'Select Tokens'
-                    : !swapFromAmount || parseFloat(swapFromAmount) <= 0
-                    ? 'Enter Amount'
-                    : swapNetwork === 'Solana Mainnet'
-                    ? 'Swap on Solana'
-                    : 'Swap on X1'}
-                </Text>
-              )}
-            </TouchableOpacity>
+            <Text style={styles.swapBalanceLabel}>
+              Balance:{' '}
+              {swapFromToken
+                ? swapFromToken.balance.toFixed(
+                    Math.min(swapFromToken.decimals, 4),
+                  )
+                : '—'}
+            </Text>
           </View>
-        )}
+
+          {/* ── Direction button ── */}
+          <TouchableOpacity
+            style={styles.swapDirectionButton}
+            onPress={handleSwapDirection}>
+            <FontAwesome name="arrow-down" size={16} color={accentColor} />
+          </TouchableOpacity>
+
+          {/* ── To ── */}
+          <View
+            style={[
+              styles.swapCard,
+              swapToToken?.network === 'Solana'
+                ? styles.swapCardSolana
+                : styles.swapCardX1,
+            ]}>
+            <Text style={styles.tokenLabel}>To</Text>
+            <View style={styles.tokenRow}>
+              <TouchableOpacity
+                style={styles.tokenSelector}
+                onPress={() =>
+                  !isLoadingSwapTokens && setShowTokenSelector('to')
+                }
+                disabled={isLoadingSwapTokens}>
+                {renderTokenIcon(swapToToken)}
+                <Text style={styles.swapTokenSymbol}>
+                  {swapToToken?.symbol ?? 'Select'}
+                </Text>
+                <FontAwesome name="chevron-down" size={12} color="#888" />
+              </TouchableOpacity>
+              <View style={styles.inputContainer}>
+                {isLoadingQuote ? (
+                  <ActivityIndicator size="small" color="#38B6FF" />
+                ) : (
+                  <Text style={styles.outputAmount}>
+                    {swapToAmount || '0.00'}
+                  </Text>
+                )}
+              </View>
+            </View>
+            <Text style={styles.swapBalanceLabel}>
+              Balance:{' '}
+              {swapToToken
+                ? swapToToken.balance.toFixed(Math.min(swapToToken.decimals, 4))
+                : '—'}
+            </Text>
+          </View>
+
+          {/* ── Exchange Rate ── */}
+          {swapFromToken &&
+            swapToToken &&
+            (isLoadingQuote ? (
+              <ActivityIndicator size="small" color="#38B6FF" />
+            ) : swapQuoteRate ? (
+              <Text style={styles.exchangeRateText}>
+                1 {swapFromToken.symbol} = {swapQuoteRate.toFixed(4)}{' '}
+                {swapToToken.symbol}
+              </Text>
+            ) : (
+              <Text style={styles.noPoolText}>
+                No liquidity pool found for this pair
+              </Text>
+            ))}
+
+          {/* ── Swap Button ── */}
+          <TouchableOpacity
+            style={[
+              styles.swapButton,
+              canSwap
+                ? {backgroundColor: accentColor}
+                : styles.swapButtonDisabled,
+            ]}
+            disabled={!canSwap}
+            onPress={handleExecuteSwap}>
+            {isExecutingSwap ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.swapButtonText}>
+                {!swapFromToken || !swapToToken
+                  ? 'Select Tokens'
+                  : !swapFromAmount || parseFloat(swapFromAmount) <= 0
+                  ? 'Enter Amount'
+                  : swapNetwork === 'Solana Mainnet'
+                  ? 'Swap on Solana'
+                  : 'Swap on X1'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
 
         {/* Swap Success Modal */}
         {renderSwapSuccessModal()}
@@ -1850,6 +1869,15 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 12,
     marginTop: 4,
+  },
+  swapBalanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  balanceSpinner: {
+    marginTop: 2,
   },
   percentButtons: {
     flexDirection: 'row',
