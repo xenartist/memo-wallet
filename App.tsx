@@ -100,6 +100,10 @@ function App(): JSX.Element {
     [],
   );
   const [isSearchingJupiter, setIsSearchingJupiter] = useState(false);
+  const [fromSelectorTab, setFromSelectorTab] = useState<
+    'X1' | 'Solana' | 'All'
+  >('X1');
+  const [fromSearchQuery, setFromSearchQuery] = useState('');
   const [swapSuccessModalVisible, setSwapSuccessModalVisible] = useState(false);
   const [swapSuccessTxId, setSwapSuccessTxId] = useState('');
 
@@ -445,6 +449,8 @@ function App(): JSX.Element {
     setSwapFromAmount('');
     setSwapToAmount('');
     setShowTokenSelector(null);
+    setFromSelectorTab('X1');
+    setFromSearchQuery('');
   };
 
   const handleSelectToToken = (token: SwapToken) => {
@@ -452,6 +458,8 @@ function App(): JSX.Element {
     setSwapFromAmount('');
     setSwapToAmount('');
     setShowTokenSelector(null);
+    setFromSelectorTab('X1');
+    setFromSearchQuery('');
   };
 
   const handleExecuteSwap = async () => {
@@ -940,8 +948,31 @@ function App(): JSX.Element {
       ? jupiterToTokens
       : xdexToTokens;
 
-    const x1Tokens = filteredTokens.filter(t => t.network === 'X1');
-    const solTokens = filteredTokens.filter(t => t.network === 'Solana');
+    // From selector: apply tab + search filters
+    const fromQ = fromSearchQuery.trim().toLowerCase();
+    const fromTabFiltered = isFrom
+      ? fromSelectorTab === 'All'
+        ? fromTokensFromPortfolio
+        : fromTokensFromPortfolio.filter(t => t.network === fromSelectorTab)
+      : filteredTokens;
+    const fromDisplayTokens =
+      isFrom && fromQ.length > 0
+        ? fromTabFiltered.filter(
+            t =>
+              t.symbol.toLowerCase().includes(fromQ) ||
+              t.name.toLowerCase().includes(fromQ),
+          )
+        : fromTabFiltered;
+
+    const x1Tokens = (isFrom ? fromDisplayTokens : filteredTokens).filter(
+      t => t.network === 'X1',
+    );
+    const solTokens = (isFrom ? fromDisplayTokens : filteredTokens).filter(
+      t => t.network === 'Solana',
+    );
+
+    // In From selector with a single-network tab, no group headers needed
+    const showGroupHeaders = !isFrom || fromSelectorTab === 'All';
 
     return (
       <Modal
@@ -952,6 +983,8 @@ function App(): JSX.Element {
           setShowTokenSelector(null);
           setJupiterSearchQuery('');
           setJupiterSearchResults([]);
+          setFromSelectorTab('X1');
+          setFromSearchQuery('');
         }}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -964,12 +997,67 @@ function App(): JSX.Element {
                   setShowTokenSelector(null);
                   setJupiterSearchQuery('');
                   setJupiterSearchResults([]);
+                  setFromSelectorTab('X1');
+                  setFromSearchQuery('');
                 }}
                 style={styles.modalCloseButton}
                 hitSlop={{top: 12, bottom: 12, left: 12, right: 12}}>
                 <FontAwesome name="times" size={22} color="#fff" />
               </TouchableOpacity>
             </View>
+
+            {/* From selector: network tab + search */}
+            {isFrom && (
+              <>
+                <View style={styles.fromTabRow}>
+                  {(['X1', 'Solana', 'All'] as const).map(tab => {
+                    const isActive = fromSelectorTab === tab;
+                    const activeColor =
+                      tab === 'X1'
+                        ? '#38B6FF'
+                        : tab === 'Solana'
+                        ? '#9945FF'
+                        : '#F0B429';
+                    return (
+                      <TouchableOpacity
+                        key={tab}
+                        style={[
+                          styles.fromTab,
+                          isActive && {backgroundColor: activeColor},
+                        ]}
+                        onPress={() => {
+                          setFromSelectorTab(tab);
+                          setFromSearchQuery('');
+                        }}>
+                        <Text
+                          style={[
+                            styles.fromTabText,
+                            isActive && styles.fromTabTextActive,
+                          ]}>
+                          {tab === 'X1'
+                            ? 'X1 Mainnet'
+                            : tab === 'Solana'
+                            ? 'Solana'
+                            : 'All'}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <View style={styles.jupiterSearchContainer}>
+                  <FontAwesome name="search" size={14} color="#888" />
+                  <TextInput
+                    style={styles.jupiterSearchInput}
+                    placeholder="Search symbol or name..."
+                    placeholderTextColor="#555"
+                    value={fromSearchQuery}
+                    onChangeText={setFromSearchQuery}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+              </>
+            )}
 
             {/* Jupiter search box (Solana To only) */}
             {isJupiterToSelector && (
@@ -992,14 +1080,22 @@ function App(): JSX.Element {
 
             <FlatList
               data={[
-                ...(x1Tokens.length > 0
+                ...(x1Tokens.length > 0 && showGroupHeaders
                   ? [{type: 'header', label: 'X1 Mainnet', key: 'h-x1'}]
                   : []),
-                ...x1Tokens.map(t => ({type: 'token', token: t, key: t.mint})),
-                ...(solTokens.length > 0
+                ...x1Tokens.map(t => ({
+                  type: 'token',
+                  token: t,
+                  key: `X1:${t.mint}`,
+                })),
+                ...(solTokens.length > 0 && showGroupHeaders
                   ? [{type: 'header', label: 'Solana Mainnet', key: 'h-sol'}]
                   : []),
-                ...solTokens.map(t => ({type: 'token', token: t, key: t.mint})),
+                ...solTokens.map(t => ({
+                  type: 'token',
+                  token: t,
+                  key: `Solana:${t.mint}`,
+                })),
               ]}
               keyExtractor={item => item.key}
               renderItem={({item}: {item: any}) => {
@@ -1020,7 +1116,7 @@ function App(): JSX.Element {
                 }
                 const t: SwapToken = item.token;
                 const disabled =
-                  t.mint === disabledToken?.mint &&
+                  t.apiMint === disabledToken?.apiMint &&
                   t.network === disabledToken?.network;
                 return (
                   <TouchableOpacity
@@ -1176,9 +1272,17 @@ function App(): JSX.Element {
               <View style={styles.tokenRow}>
                 <TouchableOpacity
                   style={styles.tokenSelector}
-                  onPress={() =>
-                    !isLoadingSwapTokens && setShowTokenSelector('from')
-                  }
+                  onPress={() => {
+                    if (isLoadingSwapTokens) {
+                      return;
+                    }
+                    const net = swapFromToken?.network;
+                    setFromSelectorTab(
+                      net === 'X1' || net === 'Solana' ? net : 'X1',
+                    );
+                    setFromSearchQuery('');
+                    setShowTokenSelector('from');
+                  }}
                   disabled={isLoadingSwapTokens}>
                   {renderTokenIcon(swapFromToken)}
                   <Text style={styles.swapTokenSymbol}>
@@ -1796,6 +1900,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 12,
     textAlign: 'center',
+  },
+  fromTabRow: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#1a1a1a',
+  },
+  fromTab: {
+    flex: 1,
+    paddingVertical: 9,
+    alignItems: 'center',
+  },
+  fromTabActive: {
+    backgroundColor: '#38B6FF',
+  },
+  fromTabText: {
+    color: '#555',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  fromTabTextActive: {
+    color: '#fff',
   },
   jupiterSearchContainer: {
     flexDirection: 'row',
