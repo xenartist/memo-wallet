@@ -1267,7 +1267,13 @@ function App(): JSX.Element {
         ) : (
           <View style={styles.swapContent}>
             {/* ── From ── */}
-            <View style={styles.swapCard}>
+            <View
+              style={[
+                styles.swapCard,
+                swapFromToken?.network === 'Solana'
+                  ? styles.swapCardSolana
+                  : styles.swapCardX1,
+              ]}>
               <Text style={styles.tokenLabel}>From</Text>
               <View style={styles.tokenRow}>
                 <TouchableOpacity
@@ -1320,7 +1326,13 @@ function App(): JSX.Element {
             </TouchableOpacity>
 
             {/* ── To ── */}
-            <View style={styles.swapCard}>
+            <View
+              style={[
+                styles.swapCard,
+                swapToToken?.network === 'Solana'
+                  ? styles.swapCardSolana
+                  : styles.swapCardX1,
+              ]}>
               <Text style={styles.tokenLabel}>To</Text>
               <View style={styles.tokenRow}>
                 <TouchableOpacity
@@ -1778,6 +1790,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a1a',
     borderRadius: 16,
     padding: 12,
+  },
+  swapCardX1: {
+    borderWidth: 1,
+    borderColor: '#38B6FF',
+  },
+  swapCardSolana: {
+    borderWidth: 1,
+    borderColor: '#9945FF',
   },
   tokenRow: {
     flexDirection: 'row',
