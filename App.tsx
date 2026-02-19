@@ -35,6 +35,7 @@ import {
   toPrepareTokenInMint,
   JUPITER_SOL_MINT,
   JUPITER_DEFAULT_SOL_TOKENS,
+  fetchJupiterDefaultSolTokens,
   fetchJupiterOrder,
   searchJupiterTokens,
   executeJupiterSwap,
@@ -77,6 +78,9 @@ function App(): JSX.Element {
 
   // ── Swap state ──────────────────────────────────────────────────────────────
   const [swapNetwork, setSwapNetwork] = useState<SwapNetwork>('X1 Mainnet');
+  const [solanaDefaultTokens, setSolanaDefaultTokens] = useState<SwapToken[]>(
+    JUPITER_DEFAULT_SOL_TOKENS,
+  );
   const [swapTokenList, setSwapTokenList] = useState<SwapToken[]>([]);
   const [swapPoolList, setSwapPoolList] = useState<PoolPair[]>([]);
   const [swapFromToken, setSwapFromToken] = useState<SwapToken | null>(null);
@@ -124,12 +128,15 @@ function App(): JSX.Element {
     const loadTokens = async () => {
       setIsLoadingSwapTokens(true);
       try {
-        const {tokens: swapToks, pools: swapPools} = await getSwapTokens(
-          publicKey,
-          swapNetwork,
-        );
+        // Fetch X1/Solana wallet tokens and Solana default list in parallel
+        const [{tokens: swapToks, pools: swapPools}, solDefaults] =
+          await Promise.all([
+            getSwapTokens(publicKey, swapNetwork),
+            fetchJupiterDefaultSolTokens(),
+          ]);
         setSwapTokenList(swapToks);
         setSwapPoolList(swapPools);
+        setSolanaDefaultTokens(solDefaults);
         // Default from: XNT (must have balance)
         let resolvedFrom = swapFromToken;
         if (swapToks.length >= 1 && !swapFromToken) {
@@ -146,13 +153,9 @@ function App(): JSX.Element {
           if (swapNetwork === 'Solana Mainnet') {
             // Solana: SOL → solXEN, other → SOL
             if (currentFrom?.symbol === 'SOL') {
-              toDefault = JUPITER_DEFAULT_SOL_TOKENS.find(
-                t => t.symbol === 'solXEN',
-              );
+              toDefault = solDefaults.find(t => t.symbol === 'solXEN');
             } else {
-              toDefault = JUPITER_DEFAULT_SOL_TOKENS.find(
-                t => t.symbol === 'SOL',
-              );
+              toDefault = solDefaults.find(t => t.symbol === 'SOL');
             }
           } else {
             // X1: XNT → MEMO, other → XNT
@@ -422,15 +425,13 @@ function App(): JSX.Element {
         // Switched from X1 → Solana
         if (token.symbol === 'SOL') {
           // From = SOL → To = solXEN
-          const solXENToken = JUPITER_DEFAULT_SOL_TOKENS.find(
+          const solXENToken = solanaDefaultTokens.find(
             t => t.symbol === 'solXEN',
           );
           setSwapToToken(solXENToken || null);
         } else {
           // From = other Solana token → To = SOL
-          const solToken = JUPITER_DEFAULT_SOL_TOKENS.find(
-            t => t.symbol === 'SOL',
-          );
+          const solToken = solanaDefaultTokens.find(t => t.symbol === 'SOL');
           setSwapToToken(solToken || null);
         }
       }
@@ -930,7 +931,7 @@ function App(): JSX.Element {
     const jupiterToTokens = isJupiterToSelector
       ? jupiterSearchQuery.trim().length > 0
         ? jupiterSearchResults
-        : JUPITER_DEFAULT_SOL_TOKENS
+        : solanaDefaultTokens
       : [];
 
     const filteredTokens = isFrom

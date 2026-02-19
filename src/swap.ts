@@ -25,6 +25,7 @@ import {
 } from './transaction';
 
 import {SeedVault} from '@solana-mobile/seed-vault-lib';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Re-export commonly used constants for swap consumers
 export {USDC_MINT, WRAPPED_XNT_MINT} from './rpc';
@@ -328,7 +329,16 @@ export async function getSwapTokens(
     }
     return a.symbol.localeCompare(b.symbol);
   });
-  return {tokens, pools};
+
+  // Apply cached metadata (fills missing logo/name) then persist fresh data
+  const metaCache = await loadSwapMetaCache();
+  const enriched = applyCachedMeta(tokens, netLabel, metaCache);
+  // Fire-and-forget: write fresh metadata back to cache
+  cacheTokenMeta(enriched, netLabel).catch(err =>
+    console.warn('[swap] getSwapTokens: cacheTokenMeta failed', err),
+  );
+
+  return {tokens: enriched, pools};
 }
 
 // ==================== Quote API ====================
@@ -798,6 +808,28 @@ export const JUPITER_DEFAULT_SOL_TOKENS: SwapToken[] = [
     network: 'Solana',
   },
   {
+    mint: '6f8deE148nynnSiWshA9vLydEbJGpDeKh5G4PRgjmzG7',
+    apiMint: '6f8deE148nynnSiWshA9vLydEbJGpDeKh5G4PRgjmzG7',
+    prepareApiMint: '6f8deE148nynnSiWshA9vLydEbJGpDeKh5G4PRgjmzG7',
+    symbol: 'solXEN',
+    name: 'solXEN',
+    logo: 'https://solxen.io/solxen-icon.png',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+  {
+    mint: 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3',
+    apiMint: 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3',
+    prepareApiMint: 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3',
+    symbol: 'SKR',
+    name: 'Seeker',
+    logo: '',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+  {
     mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     apiMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     prepareApiMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
@@ -814,9 +846,75 @@ export const JUPITER_DEFAULT_SOL_TOKENS: SwapToken[] = [
     prepareApiMint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
     symbol: 'USDT',
     name: 'USDT',
-    logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.svg',
+    logo: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/solana/assets/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.png',
     balance: 0,
     decimals: 6,
+    network: 'Solana',
+  },
+  {
+    mint: 'USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB',
+    apiMint: 'USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB',
+    prepareApiMint: 'USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB',
+    symbol: 'USD1',
+    name: 'World Liberty Financial USD',
+    logo: '',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+  {
+    mint: '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo',
+    apiMint: '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo',
+    prepareApiMint: '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo',
+    symbol: 'PYUSD',
+    name: 'PayPal USD',
+    logo: 'https://424565.fs1.hubspotusercontent-na1.net/hubfs/424565/PYUSDLOGO.png',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+  {
+    mint: 'JuprjznTrTSp2UFa3ZBUFgwdAmtZCq4MQCwysN55USD',
+    apiMint: 'JuprjznTrTSp2UFa3ZBUFgwdAmtZCq4MQCwysN55USD',
+    prepareApiMint: 'JuprjznTrTSp2UFa3ZBUFgwdAmtZCq4MQCwysN55USD',
+    symbol: 'JupUSD',
+    name: 'JupUSD',
+    logo: 'https://static.jup.ag/jupUSD/icon.png',
+    balance: 0,
+    decimals: 6,
+    network: 'Solana',
+  },
+  {
+    mint: 'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn',
+    apiMint: 'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn',
+    prepareApiMint: 'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn',
+    symbol: 'JitoSOL',
+    name: 'Jito Staked SOL',
+    logo: 'https://storage.googleapis.com/token-metadata/JitoSOL-256.png',
+    balance: 0,
+    decimals: 9,
+    network: 'Solana',
+  },
+  {
+    mint: 'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v',
+    apiMint: 'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v',
+    prepareApiMint: 'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v',
+    symbol: 'JupSOL',
+    name: 'Jupiter Staked SOL',
+    logo: 'https://static.jup.ag/jupSOL/icon.png',
+    balance: 0,
+    decimals: 9,
+    network: 'Solana',
+  },
+  {
+    mint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',
+    apiMint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',
+    prepareApiMint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',
+    symbol: 'mSOL',
+    name: 'Marinade Staked SOL',
+    logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So/logo.png',
+    balance: 0,
+    decimals: 9,
     network: 'Solana',
   },
   {
@@ -826,61 +924,6 @@ export const JUPITER_DEFAULT_SOL_TOKENS: SwapToken[] = [
     symbol: 'JUP',
     name: 'Jupiter',
     logo: 'https://static.jup.ag/jup/icon.png',
-    balance: 0,
-    decimals: 6,
-    network: 'Solana',
-  },
-  {
-    mint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
-    apiMint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
-    prepareApiMint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
-    symbol: 'BONK',
-    name: 'Bonk',
-    logo: 'https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I',
-    balance: 0,
-    decimals: 5,
-    network: 'Solana',
-  },
-  {
-    mint: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm',
-    apiMint: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm',
-    prepareApiMint: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm',
-    symbol: 'WIF',
-    name: 'dogwifhat',
-    logo: 'https://bafkreibk3covs5ltyqxa272uodhculbr6kea6betidfwy3ajsav2vjzyum.ipfs.nftstorage.link',
-    balance: 0,
-    decimals: 6,
-    network: 'Solana',
-  },
-  {
-    mint: 'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3',
-    apiMint: 'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3',
-    prepareApiMint: 'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3',
-    symbol: 'PYTH',
-    name: 'Pyth Network',
-    logo: 'https://pyth.network/token.svg',
-    balance: 0,
-    decimals: 6,
-    network: 'Solana',
-  },
-  {
-    mint: 'jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL',
-    apiMint: 'jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL',
-    prepareApiMint: 'jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL',
-    symbol: 'JTO',
-    name: 'Jito',
-    logo: 'https://metadata.jito.network/token/jto/image',
-    balance: 0,
-    decimals: 9,
-    network: 'Solana',
-  },
-  {
-    mint: 'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE',
-    apiMint: 'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE',
-    prepareApiMint: 'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE',
-    symbol: 'ORCA',
-    name: 'Orca',
-    logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE/logo.png',
     balance: 0,
     decimals: 6,
     network: 'Solana',
@@ -897,94 +940,256 @@ export const JUPITER_DEFAULT_SOL_TOKENS: SwapToken[] = [
     network: 'Solana',
   },
   {
-    mint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',
-    apiMint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',
-    prepareApiMint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',
-    symbol: 'mSOL',
-    name: 'Marinade staked SOL',
-    logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So/logo.png',
+    mint: 'cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij',
+    apiMint: 'cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij',
+    prepareApiMint: 'cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij',
+    symbol: 'cbBTC',
+    name: 'Coinbase Wrapped BTC',
+    logo: 'https://gateway.pinata.cloud/ipfs/QmZ7L8yd5j36oXXydUiYFiFsRHbi3EdgC4RuFwvM7dcqge',
     balance: 0,
-    decimals: 9,
+    decimals: 8,
     network: 'Solana',
   },
   {
-    mint: 'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1',
-    apiMint: 'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1',
-    prepareApiMint: 'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1',
-    symbol: 'bSOL',
-    name: 'BlazeStake Staked SOL',
-    logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1/logo.png',
+    mint: '3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh',
+    apiMint: '3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh',
+    prepareApiMint: '3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh',
+    symbol: 'WBTC',
+    name: 'Wrapped BTC',
+    logo: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/qfnqNqs3nCAHjnyCgLRDbBtq4p2MtHZxw8YjSyYhPoL/logo.png',
     balance: 0,
-    decimals: 9,
+    decimals: 8,
     network: 'Solana',
   },
   {
-    mint: 'WENWENvqqNya429ubCdR81ZmD69brwQaaBYY6p3LCpk',
-    apiMint: 'WENWENvqqNya429ubCdR81ZmD69brwQaaBYY6p3LCpk',
-    prepareApiMint: 'WENWENvqqNya429ubCdR81ZmD69brwQaaBYY6p3LCpk',
-    symbol: 'WEN',
-    name: 'Wen',
-    logo: 'https://shdw-drive.genesysgo.net/GwJapVHVvfM4Mw4sU8tn7HnZj9y5REe3jabCnjZpSLKD/wen_logo.png',
+    mint: 'A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS',
+    apiMint: 'A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS',
+    prepareApiMint: 'A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS',
+    symbol: 'ZEC',
+    name: 'Zcash',
+    logo: 'https://assets.coingecko.com/coins/images/486/small/circle-zcash-color.png',
     balance: 0,
-    decimals: 5,
+    decimals: 8,
     network: 'Solana',
   },
   {
-    mint: 'MEFNBXixkEbait3xn9bkm8WsJzXtVsaJEn4c8Sam21u',
-    apiMint: 'MEFNBXixkEbait3xn9bkm8WsJzXtVsaJEn4c8Sam21u',
-    prepareApiMint: 'MEFNBXixkEbait3xn9bkm8WsJzXtVsaJEn4c8Sam21u',
-    symbol: 'MEME',
-    name: 'Memecoin',
-    logo: 'https://bafkreibk3covs5ltyqxa272uodhculbr6kea6betidfwy3ajsav2vjzyum.ipfs.nftstorage.link',
-    balance: 0,
-    decimals: 6,
-    network: 'Solana',
-  },
-  {
-    mint: '7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr',
-    apiMint: '7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr',
-    prepareApiMint: '7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr',
-    symbol: 'POPCAT',
-    name: 'Popcat',
-    logo: 'https://bafkreiag3xst6zv73palwznkgmf73cjmrd6egsmydpjajdm5mpynmzfspy.ipfs.nftstorage.link',
-    balance: 0,
-    decimals: 9,
-    network: 'Solana',
-  },
-  {
-    mint: 'nosXBVoaCTtYdLvKY6Csb4AC8JCdQKKAaWYtx2ZMoo7',
-    apiMint: 'nosXBVoaCTtYdLvKY6Csb4AC8JCdQKKAaWYtx2ZMoo7',
-    prepareApiMint: 'nosXBVoaCTtYdLvKY6Csb4AC8JCdQKKAaWYtx2ZMoo7',
-    symbol: 'NOS',
-    name: 'Nosana',
-    logo: 'https://nosana.io/img/NOS_token.png',
-    balance: 0,
-    decimals: 6,
-    network: 'Solana',
-  },
-  {
-    mint: 'SHDWyBxihqiCj6YekG2GUr7wqKLeLAMK1gHZck9pL6y',
-    apiMint: 'SHDWyBxihqiCj6YekG2GUr7wqKLeLAMK1gHZck9pL6y',
-    prepareApiMint: 'SHDWyBxihqiCj6YekG2GUr7wqKLeLAMK1gHZck9pL6y',
-    symbol: 'SHDW',
-    name: 'Shadow Token',
-    logo: 'https://shdw-drive.genesysgo.net/FyvJxCR8P7NQJS7DApFbWfRgpDLq4bCjHNQ9cGJWr5xN/shadow-drive-logo.png',
-    balance: 0,
-    decimals: 9,
-    network: 'Solana',
-  },
-  {
-    mint: '6f8deE148nynnSiWshA9vLydEbJGpDeKh5G4PRgjmzG7',
-    apiMint: '6f8deE148nynnSiWshA9vLydEbJGpDeKh5G4PRgjmzG7',
-    prepareApiMint: '6f8deE148nynnSiWshA9vLydEbJGpDeKh5G4PRgjmzG7',
-    symbol: 'solXEN',
-    name: 'solXEN',
-    logo: 'https://solxen.io/solxen-icon.png',
+    mint: '98sMhvDwXj1RQi5c5Mndm3vPe9cBqPrbLaufMXFNMh5g',
+    apiMint: '98sMhvDwXj1RQi5c5Mndm3vPe9cBqPrbLaufMXFNMh5g',
+    prepareApiMint: '98sMhvDwXj1RQi5c5Mndm3vPe9cBqPrbLaufMXFNMh5g',
+    symbol: 'HYPE',
+    name: 'Hyperliquid',
+    logo: 'https://arweave.net/QBRdRop8wI4PpScSRTKyibv-fQuYBua-WOvC7tuJyJo',
     balance: 0,
     decimals: 6,
     network: 'Solana',
   },
 ];
+
+// ── Unified SwapToken metadata cache ─────────────────────────────────────────
+//
+// Stores name / symbol / logo / decimals for both X1 and Solana tokens.
+// Cache key format: "{network}:{mint}"  e.g. "X1:So111..." / "Solana:EPjF..."
+// Caching strategy (same for both networks):
+//   1. In-memory map  – instant, lives for the app session
+//   2. AsyncStorage   – persists across restarts
+//   3. Network API    – called only when no cache entry exists
+
+const SWAP_META_CACHE_KEY = 'swap_token_meta_v5';
+
+interface CachedTokenMeta {
+  name: string;
+  symbol: string;
+  logo: string | null;
+  decimals: number;
+}
+
+// In-memory layer: { "Solana:EPjF...": { name, symbol, logo, decimals }, ... }
+let swapMetaMemCache: Record<string, CachedTokenMeta> | null = null;
+
+function metaCacheKey(network: 'X1' | 'Solana', mint: string): string {
+  return `${network}:${mint}`;
+}
+
+async function loadSwapMetaCache(): Promise<Record<string, CachedTokenMeta>> {
+  if (swapMetaMemCache !== null) {
+    return swapMetaMemCache;
+  }
+  try {
+    const raw = await AsyncStorage.getItem(SWAP_META_CACHE_KEY);
+    swapMetaMemCache = raw ? JSON.parse(raw) : {};
+  } catch {
+    swapMetaMemCache = {};
+  }
+  return swapMetaMemCache!;
+}
+
+async function saveSwapMetaCache(
+  cache: Record<string, CachedTokenMeta>,
+): Promise<void> {
+  swapMetaMemCache = cache;
+  try {
+    await AsyncStorage.setItem(SWAP_META_CACHE_KEY, JSON.stringify(cache));
+  } catch (err) {
+    console.warn('[swap] saveSwapMetaCache failed:', err);
+  }
+}
+
+/**
+ * Merge cached metadata into a list of SwapTokens.
+ * Only fills in fields that are missing / empty in the token.
+ */
+function applyCachedMeta(
+  tokens: SwapToken[],
+  network: 'X1' | 'Solana',
+  cache: Record<string, CachedTokenMeta>,
+): SwapToken[] {
+  return tokens.map(t => {
+    const cached = cache[metaCacheKey(network, t.mint)];
+    if (!cached) {
+      return t;
+    }
+    return {
+      ...t,
+      name: t.name || cached.name,
+      symbol: t.symbol || cached.symbol,
+      logo: t.logo || cached.logo,
+      decimals: t.decimals ?? cached.decimals,
+    };
+  });
+}
+
+/**
+ * Write a list of SwapTokens into the shared metadata cache.
+ * Called after a successful network fetch.
+ */
+async function cacheTokenMeta(
+  tokens: SwapToken[],
+  network: 'X1' | 'Solana',
+): Promise<void> {
+  const cache = await loadSwapMetaCache();
+  let changed = false;
+  for (const t of tokens) {
+    if (!t.name && !t.symbol && !t.logo) {
+      continue; // nothing worth caching
+    }
+    const key = metaCacheKey(network, t.mint);
+    const existing = cache[key];
+    if (
+      !existing ||
+      existing.name !== t.name ||
+      existing.symbol !== t.symbol ||
+      existing.logo !== t.logo
+    ) {
+      cache[key] = {
+        name: t.name || '',
+        symbol: t.symbol || '',
+        logo: t.logo ?? null,
+        decimals: t.decimals,
+      };
+      changed = true;
+    }
+  }
+  if (changed) {
+    await saveSwapMetaCache(cache);
+  }
+}
+
+// ── fetchJupiterDefaultSolTokens ──────────────────────────────────────────────
+
+// In-memory list cache for the current session (avoid re-merging every call)
+let jupiterDefaultSolTokensCache: SwapToken[] | null = null;
+
+/**
+ * Return the default Solana token list with metadata enriched from Jupiter API.
+ *
+ * First call: loads AsyncStorage cache → if all 17 tokens are present, returns
+ * immediately.  Otherwise calls Jupiter /tokens/v2/search once for all mints,
+ * saves result to cache, and returns the merged list.
+ *
+ * Subsequent calls (same session): instant in-memory return.
+ */
+export async function fetchJupiterDefaultSolTokens(): Promise<SwapToken[]> {
+  // 1. In-memory hit
+  if (jupiterDefaultSolTokensCache !== null) {
+    return jupiterDefaultSolTokensCache;
+  }
+
+  const cache = await loadSwapMetaCache();
+  const mints = JUPITER_DEFAULT_SOL_TOKENS.map(t => t.mint);
+
+  // 2. Check if every mint is already cached
+  const allCached = mints.every(m => !!cache[metaCacheKey('Solana', m)]?.name);
+
+  if (allCached) {
+    const result = applyCachedMeta(JUPITER_DEFAULT_SOL_TOKENS, 'Solana', cache);
+    jupiterDefaultSolTokensCache = result;
+    console.log('[swap] fetchJupiterDefaultSolTokens: all tokens from cache');
+    return result;
+  }
+
+  // 3. Jupiter API – one request for all mints
+  try {
+    const query = mints.join(',');
+    const data = await jupiterFetch(
+      `/tokens/v2/search?query=${encodeURIComponent(query)}`,
+    );
+    if (!Array.isArray(data)) {
+      console.warn('[swap] fetchJupiterDefaultSolTokens: unexpected response');
+      return applyCachedMeta(JUPITER_DEFAULT_SOL_TOKENS, 'Solana', cache);
+    }
+
+    // Build mint → API metadata map
+    const apiMap: Record<string, CachedTokenMeta> = {};
+    for (const item of data) {
+      if (item.id) {
+        apiMap[item.id] = {
+          name: item.name ?? '',
+          symbol: item.symbol ?? '',
+          logo: item.icon ?? null,
+          decimals: item.decimals ?? 6,
+        };
+      }
+    }
+
+    // Merge API data into token list.
+    // Local hardcoded name/symbol take priority so display names like
+    // "Solana" / "SOL" are not overwritten by API values like "Wrapped SOL".
+    // For logo: prefer local PNG fallback over API SVG (React Native Image
+    // does not support SVG); only use API logo when local is absent AND
+    // the API URL is not an SVG.
+    const isSvgUrl = (url: string | null): boolean =>
+      !!url && (url.endsWith('.svg') || url.includes('.svg?'));
+
+    const merged = JUPITER_DEFAULT_SOL_TOKENS.map(token => {
+      const api = apiMap[token.mint];
+      if (!api) {
+        return token;
+      }
+      const apiLogo = isSvgUrl(api.logo) ? null : api.logo;
+      return {
+        ...token,
+        name: token.name || api.name,
+        symbol: token.symbol || api.symbol,
+        logo: token.logo || apiLogo,
+        decimals: token.decimals ?? api.decimals,
+      };
+    });
+
+    // Persist to unified cache
+    await cacheTokenMeta(merged, 'Solana');
+    jupiterDefaultSolTokensCache = merged;
+    console.log(
+      '[swap] fetchJupiterDefaultSolTokens: fetched from Jupiter API and cached',
+    );
+    return merged;
+  } catch (err) {
+    console.warn(
+      '[swap] fetchJupiterDefaultSolTokens failed, using cache/fallback:',
+      err,
+    );
+    return applyCachedMeta(JUPITER_DEFAULT_SOL_TOKENS, 'Solana', cache);
+  }
+}
 
 // ── Jupiter interfaces ────────────────────────────────────────────────────────
 
