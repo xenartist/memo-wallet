@@ -1764,7 +1764,7 @@ function App(): JSX.Element {
                 </Text>
                 <Text style={styles.historyMeta}>
                   {record.tokenSymbol || '—'} · {timeAgo}
-                  {showFrequency && ` · ${record.sendCount}次`}
+                  {showFrequency && ` · ${record.sendCount}x`}
                 </Text>
               </View>
               {recipientHistoryTab === 'All' && (
