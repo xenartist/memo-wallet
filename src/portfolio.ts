@@ -14,6 +14,7 @@ export interface PortfolioToken {
   decimals: number;
   rawBalance: number;
   volume_usd: number;
+  programId?: string; // Token Program ID (SPL or Token-2022)
 }
 
 // ==================== Constants ====================

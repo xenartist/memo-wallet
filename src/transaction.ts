@@ -292,6 +292,18 @@ export function buildTransactionBytes(
 }
 
 /**
+ * Extract the message portion from a transaction (for signing).
+ * Transaction format: [compact-u16 num_sigs][signatures...][message]
+ */
+export function extractMessage(txBytes: Uint8Array): Uint8Array {
+  // Read num_signatures (compact-u16, always 1 byte for ≤ 127 signers)
+  const numSignatures = txBytes[0];
+  // Message starts after: 1 byte (num_sigs) + (numSignatures * 64 bytes)
+  const messageOffset = 1 + numSignatures * 64;
+  return txBytes.slice(messageOffset);
+}
+
+/**
  * Insert a real 64-byte signature at position `signerIndex` (0-based).
  * The transaction bytes must have been produced by buildTransactionBytes().
  */

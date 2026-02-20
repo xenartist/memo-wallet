@@ -42,6 +42,14 @@ import {
   executeJupiterSwap,
 } from './src/swap';
 import {fetchAllTokens, PortfolioToken} from './src/portfolio';
+import {
+  isValidSolanaAddress,
+  executeSend,
+  loadSendHistory,
+  addSendHistory,
+  formatTimeAgo,
+  SendHistoryRecord,
+} from './src/send';
 
 // Default swap tokens shown immediately on first load (balance filled in after API loads)
 const MEMO_MINT = 'memoX1sJsBY6od7CfQ58XooRALwnocAZen4L7mW1ick';
@@ -137,6 +145,25 @@ function App(): JSX.Element {
   const [swapSuccessModalVisible, setSwapSuccessModalVisible] = useState(false);
   const [swapSuccessTxId, setSwapSuccessTxId] = useState('');
 
+  // ── Send state ──────────────────────────────────────────────────────────────
+  const [sendToken, setSendToken] = useState<PortfolioToken | null>(null);
+  const [sendRecipient, setSendRecipient] = useState('');
+  const [sendAmount, setSendAmount] = useState('');
+  const [sendFeeEstimate, setSendFeeEstimate] = useState<number | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  const [sendSuccessModalVisible, setSendSuccessModalVisible] = useState(false);
+  const [sendSuccessTxId, setSendSuccessTxId] = useState('');
+  const [showSendConfirmModal, setShowSendConfirmModal] = useState(false);
+  const [showSendTokenSelector, setShowSendTokenSelector] = useState(false);
+  const [recipientInputMode, setRecipientInputMode] = useState<
+    'manual' | 'history'
+  >('manual');
+  const [recipientHistoryTab, setRecipientHistoryTab] = useState<
+    'X1' | 'Solana' | 'All'
+  >('X1');
+  const [sendHistory, setSendHistory] = useState<SendHistoryRecord[]>([]);
+  const [isAddressValid, setIsAddressValid] = useState<boolean | null>(null);
+
   // Look up balance for a swap token from the already-loaded portfolio data.
   // Matching is done via apiMint (normalises native variants) + network.
   // Returns 0 if the token is not in the portfolio.
@@ -216,6 +243,33 @@ function App(): JSX.Element {
       };
     });
   }, [tokens, balanceFromPortfolio]);
+
+  // ── Send: Load history when entering send tab ───────────────────────────────
+  useEffect(() => {
+    if (activeTab === 'send') {
+      loadSendHistory().then(history => {
+        setSendHistory(history.records);
+      });
+    }
+  }, [activeTab]);
+
+  // ── Send: Auto-switch history tab when token changes ─────────────────────────
+  useEffect(() => {
+    if (sendToken) {
+      // Auto-switch to corresponding network tab when token changes
+      setRecipientHistoryTab(sendToken.network);
+    }
+  }, [sendToken]);
+
+  // ── Send: Validate address when recipient changes ────────────────────────────
+  useEffect(() => {
+    if (sendRecipient.trim().length === 0) {
+      setIsAddressValid(null);
+      return;
+    }
+    const valid = isValidSolanaAddress(sendRecipient);
+    setIsAddressValid(valid);
+  }, [sendRecipient]);
 
   const checkAndRequestPermission = async (): Promise<boolean> => {
     if (Platform.OS !== 'android') {
@@ -617,6 +671,154 @@ function App(): JSX.Element {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
   };
 
+  // ── Send Handlers ────────────────────────────────────────────────────────────
+
+  const handleSendButtonPress = () => {
+    setActiveTab('send');
+    // Reset send form
+    setSendToken(null);
+    setSendRecipient('');
+    setSendAmount('');
+    setSendFeeEstimate(null);
+    setRecipientInputMode('manual');
+    setIsAddressValid(null);
+  };
+
+  const handlePasteAddress = async () => {
+    const text = await Clipboard.getString();
+    if (text) {
+      setSendRecipient(text.trim());
+    }
+  };
+
+  const handleSelectSendToken = (token: PortfolioToken) => {
+    setSendToken(token);
+    setShowSendTokenSelector(false);
+    // Reset amount when switching tokens
+    setSendAmount('');
+  };
+
+  const handleSendAmountChange = (text: string) => {
+    setSendAmount(text);
+    // Validate amount against balance
+    if (sendToken && text) {
+      const amount = parseFloat(text);
+      const maxAmount = sendToken.rawBalance; // rawBalance is already in token units (ui_amount)
+      if (!isNaN(amount) && amount > maxAmount) {
+        // Amount exceeds balance - will show error in UI
+      }
+    }
+  };
+
+  const handleQuickAmount = (percentage: number) => {
+    if (!sendToken) {
+      return;
+    }
+    const maxAmount = sendToken.rawBalance; // rawBalance is already in token units
+    const amount = maxAmount * percentage;
+    setSendAmount(amount.toFixed(Math.min(sendToken.decimals, 6)));
+  };
+
+  const handleSelectHistoryAddress = (record: SendHistoryRecord) => {
+    setSendRecipient(record.address);
+    setRecipientInputMode('manual'); // Switch back to manual mode to show the address
+  };
+
+  const handleConfirmSend = () => {
+    // Validate inputs
+    if (!sendToken) {
+      Alert.alert('Error', 'Please select a token');
+      return;
+    }
+    if (!sendRecipient || !isAddressValid) {
+      Alert.alert('Error', 'Please enter a valid recipient address');
+      return;
+    }
+    const amount = parseFloat(sendAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Error', 'Please enter a valid amount');
+      return;
+    }
+    const maxAmount = sendToken.rawBalance; // rawBalance is already in token units
+    if (amount > maxAmount) {
+      Alert.alert(
+        'Error',
+        `Insufficient balance. Max: ${maxAmount.toFixed(6)} ${
+          sendToken.symbol
+        }`,
+      );
+      return;
+    }
+
+    // Show confirmation modal
+    setShowSendConfirmModal(true);
+  };
+
+  const handleExecuteSend = async () => {
+    if (!sendToken || !currentAuthToken) {
+      return;
+    }
+
+    setShowSendConfirmModal(false);
+    setIsSending(true);
+
+    try {
+      // Get derivation path if not cached
+      let path = derivationPath;
+      if (!path) {
+        const accounts = await SeedVault.getUserWallets(currentAuthToken);
+        if (accounts.length === 0) {
+          throw new Error('No wallet accounts found');
+        }
+        path = accounts[0].derivationPath;
+        setDerivationPath(path);
+      }
+
+      const result = await executeSend({
+        network: sendToken.network,
+        token: sendToken,
+        recipient: sendRecipient,
+        amount: parseFloat(sendAmount),
+        authToken: currentAuthToken,
+        derivationPath: path,
+        wallet: publicKey,
+      });
+
+      if (result.success) {
+        // Save to history
+        await addSendHistory(
+          sendRecipient,
+          sendToken.network,
+          sendToken.symbol,
+        );
+
+        // Refresh history list
+        const updatedHistory = await loadSendHistory();
+        setSendHistory(updatedHistory.records);
+
+        // Show success modal
+        setSendSuccessTxId(result.signature ?? '');
+        setSendSuccessModalVisible(true);
+
+        // Reset form
+        setSendRecipient('');
+        setSendAmount('');
+        setSendFeeEstimate(null);
+        setIsAddressValid(null);
+
+        // Refresh portfolio
+        await fetchBalances(publicKey);
+      } else {
+        Alert.alert('Send Failed', result.error || 'Unknown error');
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      Alert.alert('Send Error', msg);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   const renderLoginScreen = () => (
     <View style={styles.loginContainer}>
       <View style={styles.logoContainer}>
@@ -680,7 +882,9 @@ function App(): JSX.Element {
       </View>
 
       <View style={styles.actionRow}>
-        <TouchableOpacity style={styles.actionButton}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={handleSendButtonPress}>
           <View style={styles.actionIcon}>
             <FontAwesome name="arrow-up" size={20} color="#38B6FF" />
           </View>
@@ -1435,8 +1639,624 @@ function App(): JSX.Element {
     );
   };
 
+  // ── Send Token Selector ───────────────────────────────────────────────────────
+  const renderSendTokenSelector = () => {
+    const portfolioTokens = tokens.filter(t => t.rawBalance > 0);
+
+    return (
+      <Modal
+        visible={showSendTokenSelector}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowSendTokenSelector(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Token</Text>
+              <TouchableOpacity
+                onPress={() => setShowSendTokenSelector(false)}
+                style={styles.modalCloseButton}
+                hitSlop={{top: 12, bottom: 12, left: 12, right: 12}}>
+                <FontAwesome name="times" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            <FlatList
+              data={portfolioTokens}
+              keyExtractor={(item, index) =>
+                `${item.network}:${item.mint ?? 'native'}:${index}`
+              }
+              renderItem={({item}) => (
+                <TouchableOpacity
+                  style={styles.tokenListItem}
+                  onPress={() => handleSelectSendToken(item)}>
+                  <View style={styles.tokenIconContainer}>
+                    {item.icon_uri ? (
+                      <Image
+                        source={{uri: item.icon_uri}}
+                        style={[
+                          styles.tokenSelectorIcon,
+                          {width: 36, height: 36, borderRadius: 18},
+                        ]}
+                      />
+                    ) : (
+                      <View
+                        style={[
+                          styles.swapTokenIconPlaceholder,
+                          {width: 36, height: 36, borderRadius: 18},
+                        ]}>
+                        <Text style={styles.swapTokenIconText}>
+                          {item.symbol.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                    )}
+                    <View
+                      style={[
+                        styles.tokenSelectorNetworkBadge,
+                        item.network === 'X1'
+                          ? styles.networkBadgeX1
+                          : styles.networkBadgeSolana,
+                      ]}>
+                      <Text style={styles.tokenSelectorNetworkBadgeText}>
+                        {item.network === 'X1' ? 'X1' : 'SOL'}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.tokenListInfo}>
+                    <Text style={styles.tokenListSymbol}>{item.symbol}</Text>
+                    <Text style={styles.tokenListName}>{item.name}</Text>
+                  </View>
+                  <Text style={styles.tokenListBalance}>{item.balance}</Text>
+                </TouchableOpacity>
+              )}
+              style={styles.tokenFlatList}
+            />
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  // ── Send History List ─────────────────────────────────────────────────────────
+  const renderSendHistoryList = () => {
+    // Filter by network tab
+    const filteredHistory = sendHistory.filter(record => {
+      if (recipientHistoryTab === 'All') {
+        return true;
+      }
+      return record.network === recipientHistoryTab;
+    });
+
+    if (filteredHistory.length === 0) {
+      return (
+        <View style={styles.emptyHistoryState}>
+          <FontAwesome name="clock-o" size={32} color="#444" />
+          <Text style={styles.emptyHistoryText}>
+            {recipientHistoryTab === 'All'
+              ? 'No send history'
+              : `No ${
+                  recipientHistoryTab === 'X1' ? 'X1' : 'Solana'
+                } send history`}
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <ScrollView style={styles.historyList}>
+        {filteredHistory.map((record, index) => {
+          const timeAgo = formatTimeAgo(record.lastSentAt);
+          const showFrequency = record.sendCount > 1;
+
+          return (
+            <TouchableOpacity
+              key={`${record.address}:${record.network}:${index}`}
+              style={styles.historyItem}
+              onPress={() => handleSelectHistoryAddress(record)}>
+              <View style={styles.historyIcon}>
+                <FontAwesome name="location-arrow" size={14} color="#38B6FF" />
+              </View>
+              <View style={styles.historyInfo}>
+                <Text style={styles.historyAddress}>
+                  {formatAddress(record.address)}
+                </Text>
+                <Text style={styles.historyMeta}>
+                  {record.tokenSymbol || '—'} · {timeAgo}
+                  {showFrequency && ` · ${record.sendCount}次`}
+                </Text>
+              </View>
+              {recipientHistoryTab === 'All' && (
+                <View
+                  style={[
+                    styles.historyNetworkBadge,
+                    record.network === 'X1'
+                      ? styles.networkBadgeX1
+                      : styles.networkBadgeSolana,
+                  ]}>
+                  <Text style={styles.networkBadgeText}>
+                    {record.network === 'X1' ? 'X1' : 'SOL'}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    );
+  };
+
+  // ── Send Confirm Modal ────────────────────────────────────────────────────────
+  const renderSendConfirmModal = () => {
+    if (!sendToken) {
+      return null;
+    }
+
+    const amount = parseFloat(sendAmount);
+    const network = sendToken.network === 'X1' ? 'X1' : 'Solana';
+    const accentColor = sendToken.network === 'Solana' ? '#9945FF' : '#38B6FF';
+
+    return (
+      <Modal
+        visible={showSendConfirmModal}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setShowSendConfirmModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.swapSuccessModal}>
+            <Text style={styles.swapSuccessTitle}>Confirm Send</Text>
+
+            <View style={styles.swapSuccessRow}>
+              <Text style={styles.swapSuccessLabel}>Token</Text>
+              <View style={styles.swapSuccessValueRow}>
+                <Text style={styles.swapSuccessValue}>{sendToken.symbol}</Text>
+              </View>
+            </View>
+
+            <View style={styles.swapSuccessRow}>
+              <Text style={styles.swapSuccessLabel}>Amount</Text>
+              <View style={styles.swapSuccessValueRow}>
+                <Text style={styles.swapSuccessValue}>
+                  {amount} {sendToken.symbol}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.swapSuccessRow}>
+              <Text style={styles.swapSuccessLabel}>Recipient</Text>
+              <View style={styles.swapSuccessValueRow}>
+                <Text style={styles.swapSuccessValue}>
+                  {formatAddress(sendRecipient)}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.swapSuccessRow}>
+              <Text style={styles.swapSuccessLabel}>Network</Text>
+              <View style={styles.swapSuccessValueRow}>
+                <Text style={styles.swapSuccessValue}>{network}</Text>
+              </View>
+            </View>
+
+            {sendFeeEstimate !== null && (
+              <View style={styles.swapSuccessRow}>
+                <Text style={styles.swapSuccessLabel}>Est. Fee</Text>
+                <View style={styles.swapSuccessValueRow}>
+                  <Text style={styles.swapSuccessValue}>
+                    {sendFeeEstimate.toFixed(6)}{' '}
+                    {sendToken.network === 'X1' ? 'XNT' : 'SOL'}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            <View style={{flexDirection: 'row', gap: 12, marginTop: 24}}>
+              <TouchableOpacity
+                style={[
+                  styles.swapSuccessCloseBtn,
+                  {backgroundColor: '#333', flex: 1},
+                ]}
+                onPress={() => setShowSendConfirmModal(false)}>
+                <Text style={styles.swapSuccessCloseBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.swapSuccessCloseBtn,
+                  {backgroundColor: accentColor, flex: 1},
+                ]}
+                onPress={handleExecuteSend}>
+                <Text style={styles.swapSuccessCloseBtnText}>Confirm</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  // ── Send Success Modal ────────────────────────────────────────────────────────
+  const renderSendSuccessModal = () => {
+    const txId = sendSuccessTxId;
+    const network = sendToken?.network || 'X1';
+    const explorerBaseUrl =
+      network === 'Solana'
+        ? 'https://explorer.solana.com/tx/'
+        : 'https://explorer.mainnet.x1.xyz/tx/';
+    const explorerUrl = `${explorerBaseUrl}${txId}`;
+    const accentColor = network === 'Solana' ? '#9945FF' : '#38B6FF';
+
+    const copyToClipboard = (text: string, label: string) => {
+      Clipboard.setString(text);
+      Alert.alert('Copied', `${label} copied to clipboard`);
+    };
+
+    return (
+      <Modal
+        visible={sendSuccessModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSendSuccessModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.swapSuccessModal}>
+            <View style={styles.swapSuccessHeader}>
+              <FontAwesome name="check-circle" size={48} color="#4CAF50" />
+              <Text style={styles.swapSuccessTitle}>Send Successful!</Text>
+            </View>
+
+            <View style={styles.swapSuccessRow}>
+              <Text style={styles.swapSuccessLabel}>Transaction ID</Text>
+              <View style={styles.swapSuccessValueRow}>
+                <Text style={styles.swapSuccessValue}>
+                  {txId.slice(0, 8)}...{txId.slice(-8)}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => copyToClipboard(txId, 'Transaction ID')}
+                  style={styles.swapSuccessCopyBtn}>
+                  <FontAwesome name="copy" size={16} color={accentColor} />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.swapSuccessRow}>
+              <Text style={styles.swapSuccessLabel}>Explorer</Text>
+              <View style={styles.swapSuccessValueRow}>
+                <Text style={styles.swapSuccessValue} numberOfLines={1}>
+                  {explorerUrl.slice(0, 30)}...
+                </Text>
+                <TouchableOpacity
+                  onPress={() => copyToClipboard(explorerUrl, 'Explorer URL')}
+                  style={styles.swapSuccessCopyBtn}>
+                  <FontAwesome name="copy" size={16} color={accentColor} />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.swapSuccessCloseBtn,
+                {backgroundColor: accentColor},
+              ]}
+              onPress={() => setSendSuccessModalVisible(false)}>
+              <Text style={styles.swapSuccessCloseBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  // ── Send Screen ───────────────────────────────────────────────────────────────
+  const renderSendScreen = () => {
+    const accentColor = sendToken?.network === 'Solana' ? '#9945FF' : '#38B6FF';
+
+    // Calculate if send is valid
+    let canSend = false;
+    if (
+      sendToken &&
+      sendRecipient &&
+      isAddressValid === true &&
+      sendAmount &&
+      !isSending
+    ) {
+      const amount = parseFloat(sendAmount);
+      const maxAmount = sendToken.rawBalance; // rawBalance is already in token units
+      canSend = amount > 0 && amount <= maxAmount;
+    }
+
+    return (
+      <View style={styles.screenContainer}>
+        {/* Token Selector Modal */}
+        {renderSendTokenSelector()}
+
+        {/* Confirm Modal */}
+        {renderSendConfirmModal()}
+
+        {/* Success Modal */}
+        {renderSendSuccessModal()}
+
+        {/* Header */}
+        <View style={styles.screenHeader}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => setActiveTab('portfolio')}>
+            <FontAwesome name="arrow-left" size={20} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.screenTitle}>Send</Text>
+          {sendToken && (
+            <View
+              style={[
+                styles.networkBadgePill,
+                sendToken.network === 'X1'
+                  ? styles.networkBadgePillX1
+                  : styles.networkBadgePillSol,
+              ]}>
+              <Text style={styles.networkBadgePillText}>
+                {sendToken.network === 'X1' ? 'X1' : 'SOL'}
+              </Text>
+            </View>
+          )}
+          {!sendToken && <View style={styles.placeholder} />}
+        </View>
+
+        <View style={styles.swapContent}>
+          {/* Token Selector */}
+          <Text style={styles.sendLabel}>Select Token</Text>
+          <TouchableOpacity
+            style={styles.sendTokenCard}
+            onPress={() => setShowSendTokenSelector(true)}>
+            {sendToken ? (
+              <View style={styles.sendTokenRow}>
+                <View style={styles.sendTokenLeft}>
+                  {sendToken.icon_uri ? (
+                    <Image
+                      source={{uri: sendToken.icon_uri}}
+                      style={styles.sendTokenIcon}
+                    />
+                  ) : (
+                    <View style={styles.sendTokenPlaceholder}>
+                      <Text style={styles.sendTokenPlaceholderText}>
+                        {sendToken.symbol.charAt(0)}
+                      </Text>
+                    </View>
+                  )}
+                  <Text style={styles.sendTokenSymbol}>{sendToken.symbol}</Text>
+                </View>
+                <Text style={styles.sendTokenBalance}>
+                  Balance: {sendToken.balance}
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.sendTokenPlaceholderLabel}>
+                Tap to select token
+              </Text>
+            )}
+          </TouchableOpacity>
+
+          {/* Recipient Address Section */}
+          <Text style={styles.sendLabel}>Recipient Address</Text>
+
+          {/* Mode Tab: Manual vs History */}
+          <View style={styles.recipientModeTab}>
+            <TouchableOpacity
+              style={[
+                styles.recipientModeButton,
+                recipientInputMode === 'manual' && {
+                  backgroundColor: accentColor,
+                },
+              ]}
+              onPress={() => setRecipientInputMode('manual')}>
+              <Text
+                style={[
+                  styles.recipientModeText,
+                  recipientInputMode === 'manual' &&
+                    styles.recipientModeTextActive,
+                ]}>
+                Manual Input
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.recipientModeButton,
+                recipientInputMode === 'history' && {
+                  backgroundColor: accentColor,
+                },
+              ]}
+              onPress={() => setRecipientInputMode('history')}>
+              <Text
+                style={[
+                  styles.recipientModeText,
+                  recipientInputMode === 'history' &&
+                    styles.recipientModeTextActive,
+                ]}>
+                Recent
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Manual Input Mode */}
+          {recipientInputMode === 'manual' && (
+            <>
+              <View style={styles.sendRecipientRow}>
+                <TextInput
+                  style={styles.sendRecipientInput}
+                  value={sendRecipient}
+                  onChangeText={setSendRecipient}
+                  placeholder="Enter recipient address"
+                  placeholderTextColor="#555"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  style={styles.sendIconButton}
+                  onPress={() => Alert.alert('Info', 'QR scanner coming soon')}>
+                  <FontAwesome name="camera" size={18} color="#888" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.sendIconButton}
+                  onPress={handlePasteAddress}>
+                  <FontAwesome name="paste" size={18} color="#888" />
+                </TouchableOpacity>
+              </View>
+              {isAddressValid === true && (
+                <Text style={styles.addressValidText}>✓ Valid address</Text>
+              )}
+              {isAddressValid === false && (
+                <Text style={styles.addressInvalidText}>✗ Invalid address</Text>
+              )}
+            </>
+          )}
+
+          {/* History Mode */}
+          {recipientInputMode === 'history' && (
+            <>
+              {/* Network Tab */}
+              <View style={styles.historyTabRow}>
+                {(['X1', 'Solana', 'All'] as const).map(tab => {
+                  const isActive = recipientHistoryTab === tab;
+                  const activeColor =
+                    tab === 'X1'
+                      ? '#38B6FF'
+                      : tab === 'Solana'
+                      ? '#9945FF'
+                      : '#F0B429';
+                  return (
+                    <TouchableOpacity
+                      key={tab}
+                      style={[
+                        styles.historyTab,
+                        isActive && {backgroundColor: activeColor},
+                      ]}
+                      onPress={() => setRecipientHistoryTab(tab)}>
+                      <Text
+                        style={[
+                          styles.historyTabText,
+                          isActive && styles.historyTabTextActive,
+                        ]}>
+                        {tab === 'X1'
+                          ? 'X1 Mainnet'
+                          : tab === 'Solana'
+                          ? 'Solana'
+                          : 'All'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* History List */}
+              {renderSendHistoryList()}
+            </>
+          )}
+
+          {/* Amount Input */}
+          <Text style={styles.sendLabel}>Amount</Text>
+          <View style={styles.sendAmountCard}>
+            <TextInput
+              style={styles.sendAmountInput}
+              value={sendAmount}
+              onChangeText={handleSendAmountChange}
+              placeholder="0.00"
+              placeholderTextColor="#555"
+              keyboardType="decimal-pad"
+              editable={!isSending}
+            />
+            {sendToken && (
+              <Text style={styles.sendAmountUnit}>{sendToken.symbol}</Text>
+            )}
+          </View>
+
+          {/* Balance validation */}
+          {sendToken &&
+            sendAmount &&
+            (() => {
+              const amount = parseFloat(sendAmount);
+              const maxAmount = sendToken.rawBalance; // rawBalance is already in token units
+              if (!isNaN(amount) && amount > maxAmount) {
+                return (
+                  <Text style={styles.addressInvalidText}>
+                    ✗ Insufficient balance. Max:{' '}
+                    {maxAmount.toFixed(Math.min(sendToken.decimals, 6))}{' '}
+                    {sendToken.symbol}
+                  </Text>
+                );
+              }
+              return null;
+            })()}
+
+          {/* Quick Amount Buttons */}
+          {sendToken && (
+            <View style={styles.quickAmountRow}>
+              <TouchableOpacity
+                style={styles.quickAmountButton}
+                onPress={() => handleQuickAmount(0.25)}>
+                <Text style={[styles.quickAmountText, {color: accentColor}]}>
+                  25%
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.quickAmountButton}
+                onPress={() => handleQuickAmount(0.5)}>
+                <Text style={[styles.quickAmountText, {color: accentColor}]}>
+                  50%
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.quickAmountButton}
+                onPress={() => handleQuickAmount(0.75)}>
+                <Text style={[styles.quickAmountText, {color: accentColor}]}>
+                  75%
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.quickAmountButton}
+                onPress={() => handleQuickAmount(1.0)}>
+                <Text style={[styles.quickAmountText, {color: accentColor}]}>
+                  MAX
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Fee Estimate (placeholder for now) */}
+          {sendFeeEstimate !== null && (
+            <Text style={styles.sendFeeText}>
+              Est. Fee: {sendFeeEstimate.toFixed(6)}{' '}
+              {sendToken?.network === 'X1' ? 'XNT' : 'SOL'}
+            </Text>
+          )}
+
+          {/* Send Button */}
+          <TouchableOpacity
+            style={[
+              styles.swapButton,
+              canSend
+                ? {backgroundColor: accentColor}
+                : styles.swapButtonDisabled,
+            ]}
+            disabled={!canSend}
+            onPress={handleConfirmSend}>
+            {isSending ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.swapButtonText}>
+                {!sendToken
+                  ? 'Select Token'
+                  : !sendRecipient || isAddressValid !== true
+                  ? 'Enter Valid Address'
+                  : !sendAmount || parseFloat(sendAmount) <= 0
+                  ? 'Enter Amount'
+                  : 'Send'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   const renderContent = () => {
     switch (activeTab) {
+      case 'send':
+        return renderSendScreen();
       case 'swap':
         return renderSwapScreen();
       case 'settings':
@@ -1452,7 +2272,7 @@ function App(): JSX.Element {
       <View style={styles.contentInner}>
         {!connected ? (
           renderLoginScreen()
-        ) : activeTab === 'swap' ? (
+        ) : activeTab === 'swap' || activeTab === 'send' ? (
           <View style={styles.swapScrollView}>
             <ScrollView
               style={styles.swapScrollView}
@@ -2183,6 +3003,251 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+
+  // ── Send Styles ────────────────────────────────────────────────────────────
+  sendLabel: {
+    color: '#888',
+    fontSize: 13,
+    marginBottom: 8,
+    marginTop: 16,
+  },
+  sendTokenCard: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+  },
+  sendTokenRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sendTokenLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  sendTokenIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  sendTokenPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#0a0a0a',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendTokenPlaceholderText: {
+    color: '#888',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  sendTokenSymbol: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  sendTokenBalance: {
+    color: '#888',
+    fontSize: 14,
+  },
+  sendTokenPlaceholderLabel: {
+    color: '#888',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+
+  // Recipient Mode Tab
+  recipientModeTab: {
+    flexDirection: 'row',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 8,
+    padding: 4,
+    marginBottom: 12,
+  },
+  recipientModeButton: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: 6,
+  },
+  recipientModeText: {
+    color: '#888',
+    fontSize: 14,
+  },
+  recipientModeTextActive: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+
+  // Recipient Input
+  sendRecipientRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    gap: 8,
+  },
+  sendRecipientInput: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 14,
+    paddingVertical: 12,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  sendIconButton: {
+    padding: 8,
+  },
+  addressValidText: {
+    color: '#4CAF50',
+    fontSize: 12,
+    marginTop: 6,
+  },
+  addressInvalidText: {
+    color: '#F44336',
+    fontSize: 12,
+    marginTop: 6,
+  },
+
+  // History Placeholder
+  historyPlaceholder: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    padding: 32,
+    alignItems: 'center',
+  },
+  historyPlaceholderText: {
+    color: '#888',
+    fontSize: 14,
+  },
+
+  // Amount Input
+  sendAmountCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    gap: 8,
+  },
+  sendAmountInput: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '600',
+    paddingVertical: 16,
+  },
+  sendAmountUnit: {
+    color: '#888',
+    fontSize: 16,
+  },
+
+  // Quick Amount Buttons
+  quickAmountRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  quickAmountButton: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  quickAmountText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // Fee Estimate
+  sendFeeText: {
+    color: '#888',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 16,
+  },
+
+  // History Tab
+  historyTabRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  historyTab: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  historyTabText: {
+    color: '#888',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  historyTabTextActive: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+
+  // History List
+  historyList: {
+    maxHeight: 200,
+  },
+  historyItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  historyIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#0a0a0a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  historyInfo: {
+    flex: 1,
+  },
+  historyAddress: {
+    color: '#fff',
+    fontSize: 13,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    marginBottom: 3,
+  },
+  historyMeta: {
+    color: '#888',
+    fontSize: 11,
+  },
+  historyNetworkBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+    marginLeft: 8,
+  },
+  emptyHistoryState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+  },
+  emptyHistoryText: {
+    color: '#666',
+    fontSize: 13,
+    marginTop: 12,
   },
 });
 

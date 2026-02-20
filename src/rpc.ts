@@ -1,4 +1,6 @@
 // Shared RPC utilities and constants
+import {PublicKey} from '@solana/web3.js';
+import {getAssociatedTokenAddress, TOKEN_PROGRAM_ID} from '@solana/spl-token';
 
 // ==================== RPC Endpoints ====================
 export const X1_RPC_URL = 'https://rpc.mainnet.x1.xyz';
@@ -247,6 +249,38 @@ export function base64DecodeToUint8Array(base64String: string): Uint8Array {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
+}
+
+// ==================== ATA (Associated Token Account) ====================
+
+/**
+ * Derive Associated Token Account (ATA) address using @solana/spl-token
+ * This is the official implementation and handles all edge cases correctly
+ */
+export async function deriveATAAddress(
+  owner: string,
+  mint: string,
+): Promise<string> {
+  try {
+    const ownerPubkey = new PublicKey(owner);
+    const mintPubkey = new PublicKey(mint);
+
+    const ata = await getAssociatedTokenAddress(
+      mintPubkey,
+      ownerPubkey,
+      false, // allowOwnerOffCurve
+      TOKEN_PROGRAM_ID,
+    );
+
+    return ata.toBase58();
+  } catch (error) {
+    console.error('[rpc] Failed to derive ATA:', error);
+    throw new Error(
+      `Failed to derive ATA: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 // ==================== Transaction RPC Methods ====================
