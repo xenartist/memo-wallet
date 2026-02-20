@@ -50,6 +50,7 @@ import {
   formatTimeAgo,
   SendHistoryRecord,
 } from './src/send';
+import QRScanner from './src/QRScanner';
 
 // Default swap tokens shown immediately on first load (balance filled in after API loads)
 const MEMO_MINT = 'memoX1sJsBY6od7CfQ58XooRALwnocAZen4L7mW1ick';
@@ -163,6 +164,7 @@ function App(): JSX.Element {
   >('X1');
   const [sendHistory, setSendHistory] = useState<SendHistoryRecord[]>([]);
   const [isAddressValid, setIsAddressValid] = useState<boolean | null>(null);
+  const [showQRScanner, setShowQRScanner] = useState(false);
 
   // Look up balance for a swap token from the already-loaded portfolio data.
   // Matching is done via apiMint (normalises native variants) + network.
@@ -1973,6 +1975,17 @@ function App(): JSX.Element {
         {/* Success Modal */}
         {renderSendSuccessModal()}
 
+        {/* QR Scanner */}
+        <QRScanner
+          visible={showQRScanner}
+          onClose={() => setShowQRScanner(false)}
+          onScanSuccess={address => {
+            setSendRecipient(address);
+            setRecipientInputMode('manual');
+            setShowQRScanner(false);
+          }}
+        />
+
         {/* Header */}
         <View style={styles.screenHeader}>
           <TouchableOpacity
@@ -2087,7 +2100,7 @@ function App(): JSX.Element {
                 />
                 <TouchableOpacity
                   style={styles.sendIconButton}
-                  onPress={() => Alert.alert('Info', 'QR scanner coming soon')}>
+                  onPress={() => setShowQRScanner(true)}>
                   <FontAwesome name="camera" size={18} color="#888" />
                 </TouchableOpacity>
                 <TouchableOpacity

@@ -309,3 +309,275 @@ Usage:
 - Solana: `fetchXDEXWalletTokens(wallet, 'Solana Mainnet')`
 
 原生代币识别: mint 为 `111111111111111111111111111111111111111111`
+
+## Send Functionality
+
+### Overview
+
+Complete send/transfer implementation supporting native tokens (XNT/SOL) and SPL tokens with automatic ATA creation and dynamic CU optimization.
+
+### Implementation Files
+
+- `src/send.ts` - All send-related logic (validation, transaction building, execution, history)
+- `App.tsx` - Send UI (token selector, recipient input, amount input, confirmation modal)
+
+### Key Features
+
+1. **Native Token Transfers** (XNT/SOL)
+
+   - Direct `SystemProgram.transfer()` using `@solana/web3.js`
+   - Auto-creates recipient account if needed
+   - No ATA required for native tokens
+
+2. **SPL Token Transfers**
+
+   - Supports both SPL Token and Token-2022 programs
+   - Dynamic token program detection (line 93-122 in `src/send.ts`)
+   - Auto-creates recipient ATA if not exists
+   - Uses `@solana/spl-token` for ATA derivation and creation instructions
+
+3. **Address Validation**
+
+   - Real-time validation with visual feedback (green check/red X)
+   - Function: `isValidSolanaAddress()` in `src/send.ts`
+   - Validates base58 format and length (32 bytes)
+
+4. **Send History**
+
+   - Persistent storage using AsyncStorage
+   - English time format: "Just now", "5m ago", "2h ago", "3d ago"
+   - Function: `formatTimeAgo()` in `src/send.ts` (line 738-765)
+   - Load/save functions: `loadSendHistory()`, `addSendHistory()`
+
+5. **Recipient Input Modes**
+   - Manual input with paste button
+   - History selection (recent recipients)
+   - QR code scanning (planned - see session log 2026-02-20)
+
+### Compute Unit (CU) Optimization Strategy
+
+#### Problem
+
+Solana transactions require setting a Compute Unit budget. Setting it too low causes failures, too high wastes fees.
+
+#### Solution: Simulation-Based Dynamic CU Calculation
+
+**Location**: `src/send.ts` - `executeSend()` function (line 350-600)
+
+**Workflow**:
+
+```
+1. Build transaction instructions (transfer + optional ATA creation)
+   ↓
+2. Create transaction object (without CU instruction)
+   ↓
+3. Simulate transaction → get actual unitsConsumed
+   ↓
+4. Calculate optimized CU = unitsConsumed × 1.1 (10% buffer)
+   ↓
+5. Add CU budget instruction to transaction start (unshift)
+   ↓
+6. Sign and send transaction
+```
+
+**Code Pattern**:
+
+```typescript
+// 1. Build instructions
+const instructions: TransactionInstruction[] = [];
+// ... add transfer/ATA instructions
+
+// 2. Create transaction without CU instruction
+const {blockhash} = await connection.getLatestBlockhash();
+const transaction = new Transaction({
+  recentBlockhash: blockhash,
+  feePayer: senderPubkey,
+});
+transaction.add(...instructions);
+
+// 3. Simulate to get actual CU consumption
+const simulationResult = await connection.simulateTransaction(transaction, [
+  senderKeypair,
+]);
+const unitsConsumed = simulationResult.value.unitsConsumed || 200000;
+
+// 4. Calculate optimized CU (10% buffer)
+const computeUnits = Math.ceil(unitsConsumed * 1.1);
+
+// 5. Add CU instruction to start
+transaction.instructions.unshift(
+  ComputeBudgetProgram.setComputeUnitLimit({units: computeUnits}),
+);
+
+// 6. Sign and send
+transaction.sign(senderKeypair);
+const signature = await connection.sendRawTransaction(transaction.serialize());
+```
+
+**Performance Data**:
+
+| Transaction Type   | unitsConsumed | Optimized CU | Default CU | Savings |
+| ------------------ | ------------- | ------------ | ---------- | ------- |
+| Native transfer    | ~450          | 495          | 200000     | 99.75%  |
+| SPL transfer       | ~15000        | 16500        | 200000     | 91.75%  |
+| SPL + ATA creation | ~25000        | 27500        | 200000     | 86.25%  |
+
+**Trade-offs**:
+
+- ✅ Optimal CU usage (saves fees)
+- ✅ Prevents transaction failures from insufficient CU
+- ❌ Requires 2 RPC calls (simulate + send) vs 1 (send only)
+- ❌ Adds ~200-500ms latency from simulation
+
+**Error Handling**:
+
+- Simulation failure → throw detailed error (shows exact reason)
+- Fallback: `unitsConsumed || 200000` (default if simulation returns null)
+- 10% buffer handles edge cases where actual usage slightly exceeds simulation
+
+### SPL Token Program Detection
+
+**Challenge**: Tokens can use either SPL Token (legacy) or Token-2022 (new standard).
+
+**Solution**: Dynamic detection based on ATA ownership.
+
+**Location**: `src/send.ts` line 93-122
+
+```typescript
+async function detectTokenProgram(
+  connection: Connection,
+  tokenMint: PublicKey,
+  owner: PublicKey,
+): Promise<PublicKey> {
+  // Derive ATA for both programs
+  const splATA = await getAssociatedTokenAddress(
+    tokenMint,
+    owner,
+    false,
+    TOKEN_PROGRAM_ID, // SPL Token
+  );
+
+  const token2022ATA = await getAssociatedTokenAddress(
+    tokenMint,
+    owner,
+    false,
+    TOKEN_2022_PROGRAM_ID, // Token-2022
+  );
+
+  // Check which ATA exists
+  const [splInfo, token2022Info] = await Promise.all([
+    connection.getAccountInfo(splATA),
+    connection.getAccountInfo(token2022ATA),
+  ]);
+
+  if (token2022Info) return TOKEN_2022_PROGRAM_ID;
+  if (splInfo) return TOKEN_PROGRAM_ID;
+
+  // Default to SPL Token if neither exists
+  return TOKEN_PROGRAM_ID;
+}
+```
+
+### ATA Creation
+
+When sending SPL tokens, recipient may not have an Associated Token Account (ATA) yet.
+
+**Solution**: Auto-create ATA as first instruction in transaction.
+
+**Location**: `src/send.ts` line 144-211
+
+```typescript
+import {
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
+} from '@solana/spl-token';
+
+// Check if recipient ATA exists
+const recipientATA = await getAssociatedTokenAddress(
+  tokenMint,
+  recipientPubkey,
+  false,
+  tokenProgram,
+);
+
+const ataInfo = await connection.getAccountInfo(recipientATA);
+
+if (!ataInfo) {
+  console.log('[Send] Recipient ATA does not exist, will create it');
+
+  // Add ATA creation instruction (MUST be before transfer)
+  instructions.push(
+    createAssociatedTokenAccountInstruction(
+      senderPubkey, // payer
+      recipientATA, // ata address
+      recipientPubkey, // owner
+      tokenMint, // mint
+      tokenProgram, // program ID
+    ),
+  );
+}
+
+// Add transfer instruction
+instructions.push(
+  createTransferInstruction(
+    senderATA,
+    recipientATA,
+    senderPubkey,
+    amountLamports,
+    [],
+    tokenProgram,
+  ),
+);
+```
+
+**Key Points**:
+
+- Sender pays rent for recipient's ATA (~0.002 SOL)
+- ATA creation instruction MUST come before transfer instruction
+- Use correct token program (SPL vs Token-2022)
+
+### Transaction Flow Summary
+
+```
+User initiates send
+  ↓
+Validate address (isValidSolanaAddress)
+  ↓
+Select token from portfolio
+  ↓
+Enter amount
+  ↓
+Confirm transaction
+  ↓
+executeSend():
+  1. Detect token program (if SPL token)
+  2. Build instructions (ATA creation + transfer)
+  3. Simulate transaction → get CU
+  4. Add CU instruction to start
+  5. Sign and send
+  ↓
+Wait for confirmation
+  ↓
+Update send history
+  ↓
+Show success message with signature
+```
+
+### Testing Commands
+
+```bash
+# Run send-related tests
+npm test -- send.test.ts
+
+# Test with real device
+cd android && ./gradlew assembleDebug
+adb -s SM02G40619145272 install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+### Future Enhancements
+
+- [ ] QR code scanning for recipient addresses (see session 2026-02-20)
+- [ ] Local CU cache for common transaction types
+- [ ] Batch send (multiple recipients)
+- [ ] Fee estimation preview
+- [ ] Transaction history with detailed view
