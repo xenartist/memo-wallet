@@ -51,6 +51,7 @@ import {
   SendHistoryRecord,
 } from './src/send';
 import QRScanner from './src/QRScanner';
+import QRCode from 'react-native-qrcode-svg';
 
 // Default swap tokens shown immediately on first load (balance filled in after API loads)
 const MEMO_MINT = 'memoX1sJsBY6od7CfQ58XooRALwnocAZen4L7mW1ick';
@@ -165,6 +166,9 @@ function App(): JSX.Element {
   const [sendHistory, setSendHistory] = useState<SendHistoryRecord[]>([]);
   const [isAddressValid, setIsAddressValid] = useState<boolean | null>(null);
   const [showQRScanner, setShowQRScanner] = useState(false);
+
+  // ── Receive state ───────────────────────────────────────────────────────────
+  // (No state needed - only displays address and QR code)
 
   // Look up balance for a swap token from the already-loaded portfolio data.
   // Matching is done via apiMint (normalises native variants) + network.
@@ -892,7 +896,9 @@ function App(): JSX.Element {
           </View>
           <Text style={styles.actionText}>Send</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => setActiveTab('receive')}>
           <View style={styles.actionIcon}>
             <FontAwesome name="arrow-down" size={20} color="#38B6FF" />
           </View>
@@ -1452,6 +1458,52 @@ function App(): JSX.Element {
           </View>
         </View>
       </Modal>
+    );
+  };
+
+  // ── Receive Screen ────────────────────────────────────────────────────────────
+  const renderReceiveScreen = () => {
+    return (
+      <View style={styles.screenContainer}>
+        <View style={styles.screenHeader}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => setActiveTab('portfolio')}>
+            <FontAwesome name="arrow-left" size={20} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.screenTitle}>Receive</Text>
+          <View style={styles.placeholder} />
+        </View>
+
+        <ScrollView
+          style={styles.receiveContent}
+          contentContainerStyle={styles.receiveContentInner}>
+          {/* QR Code Section */}
+          <View style={styles.qrSection}>
+            <View style={styles.qrCodeContainer}>
+              <QRCode value={publicKey} size={220} backgroundColor="#fff" />
+            </View>
+
+            <Text style={styles.qrHint}>Scan to receive on X1 & Solana</Text>
+          </View>
+
+          {/* Address Section */}
+          <View style={styles.addressSection}>
+            <Text style={styles.addressLabel}>Your Wallet Address</Text>
+            <View style={styles.addressBox}>
+              <Text style={styles.addressFullText} selectable>
+                {publicKey}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.copyAddressButton}
+              onPress={copyAddress}>
+              <FontAwesome name="copy" size={16} color="#fff" />
+              <Text style={styles.copyAddressText}>Copy Address</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </View>
     );
   };
 
@@ -2272,6 +2324,8 @@ function App(): JSX.Element {
         return renderSendScreen();
       case 'swap':
         return renderSwapScreen();
+      case 'receive':
+        return renderReceiveScreen();
       case 'settings':
         return renderSettingsScreen();
       default:
@@ -2285,7 +2339,9 @@ function App(): JSX.Element {
       <View style={styles.contentInner}>
         {!connected ? (
           renderLoginScreen()
-        ) : activeTab === 'swap' || activeTab === 'send' ? (
+        ) : activeTab === 'swap' ||
+          activeTab === 'send' ||
+          activeTab === 'receive' ? (
           <View style={styles.swapScrollView}>
             <ScrollView
               style={styles.swapScrollView}
@@ -3261,6 +3317,138 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 13,
     marginTop: 12,
+  },
+  // ── Receive Screen Styles ────────────────────────────────────────────────
+  receiveContent: {
+    flex: 1,
+  },
+  receiveContentInner: {
+    padding: 20,
+  },
+  qrSection: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  qrCodeContainer: {
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 16,
+    marginBottom: 16,
+  },
+  qrHint: {
+    color: '#888',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  addressSection: {
+    marginBottom: 32,
+  },
+  addressLabel: {
+    color: '#888',
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  addressBox: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  addressFullText: {
+    color: '#fff',
+    fontSize: 13,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    lineHeight: 20,
+  },
+  copyAddressButton: {
+    backgroundColor: '#38B6FF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    gap: 8,
+  },
+  copyAddressText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  historySection: {
+    marginBottom: 20,
+  },
+  historySectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  historySectionTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  emptyHistoryContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+  },
+  emptyHistoryIcon: {
+    marginBottom: 16,
+  },
+  emptyHistoryHint: {
+    color: '#666',
+    fontSize: 13,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  historyItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  historyItemIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#1a3a1a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  historyItemInfo: {
+    flex: 1,
+  },
+  historyItemAmount: {
+    color: '#4CAF50',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  historyItemFrom: {
+    color: '#888',
+    fontSize: 13,
+  },
+  historyItemRight: {
+    alignItems: 'flex-end',
+  },
+  historyItemTime: {
+    color: '#888',
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  historyItemNetworkBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  historyItemNetworkText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
   },
 });
 
