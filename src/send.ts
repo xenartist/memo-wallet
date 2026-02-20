@@ -747,19 +747,19 @@ export function formatTimeAgo(timestamp: number): string {
   const months = Math.floor(days / 30);
 
   if (months > 0) {
-    return `${months}月前`;
+    return `${months}mo ago`;
   }
   if (weeks > 0) {
-    return `${weeks}周前`;
+    return `${weeks}w ago`;
   }
   if (days > 0) {
-    return `${days}天前`;
+    return `${days}d ago`;
   }
   if (hours > 0) {
-    return `${hours}小时前`;
+    return `${hours}h ago`;
   }
   if (minutes > 0) {
-    return `${minutes}分钟前`;
+    return `${minutes}m ago`;
   }
-  return '刚刚';
+  return 'Just now';
 }
