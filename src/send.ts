@@ -360,6 +360,116 @@ export async function estimateSendFee(params: {
   }
 }
 
+// ==================== Fee Display Estimation ====================
+
+/**
+ * Estimate the fee for display in the confirmation dialog.
+ * Builds the same instructions as executeSend but only simulates (no signing).
+ * Returns fee in token units (XNT or SOL).
+ */
+export async function estimateSendFeeForDisplay(params: {
+  network: 'X1' | 'Solana';
+  token: PortfolioToken;
+  recipient: string;
+  amount: number;
+  wallet: string;
+}): Promise<number> {
+  const {network, token, recipient, amount, wallet} = params;
+
+  const FALLBACK_FEE = network === 'X1' ? 0.001 : 0.0001;
+
+  try {
+    const rpcUrl = rpcUrlForNetwork(
+      network === 'X1' ? 'X1 Mainnet' : 'Solana Mainnet',
+    );
+
+    const amountLamports = Math.round(amount * Math.pow(10, token.decimals));
+    if (amountLamports <= 0) {
+      return FALLBACK_FEE;
+    }
+
+    const instructions: InstructionJSON[] = [];
+
+    if (isNativeToken(token.mint)) {
+      instructions.push(
+        createNativeTransferInstruction({
+          from: wallet,
+          to: recipient,
+          lamports: amountLamports,
+        }),
+      );
+    } else {
+      const senderATA = await getATA(wallet, token.mint!, rpcUrl);
+      if (!senderATA) {
+        return FALLBACK_FEE;
+      }
+      const tokenProgramId = await detectTokenProgram(token.mint!, rpcUrl);
+      let recipientATA = await getATA(recipient, token.mint!, rpcUrl);
+
+      if (!recipientATA) {
+        try {
+          const ownerPubkey = new PublicKey(recipient);
+          const mintPubkey = new PublicKey(token.mint!);
+          const programIdPubkey = new PublicKey(tokenProgramId);
+          const ata = await getAssociatedTokenAddress(
+            mintPubkey,
+            ownerPubkey,
+            false,
+            programIdPubkey,
+          );
+          recipientATA = ata.toBase58();
+          instructions.push(
+            buildCreateATAInstruction({
+              payer: wallet,
+              owner: recipient,
+              mint: token.mint!,
+              ataAddress: recipientATA,
+              tokenProgramId,
+            }),
+          );
+        } catch {
+          return FALLBACK_FEE;
+        }
+      }
+
+      instructions.push(
+        createSPLTransferInstruction({
+          source: senderATA,
+          destination: recipientATA,
+          owner: wallet,
+          amount: amountLamports,
+          tokenProgramId,
+        }),
+      );
+    }
+
+    const blockhash = await getLatestBlockhash(rpcUrl);
+    const simInstructions = addComputeBudgetInstructions(
+      instructions,
+      1400000,
+      1000,
+    );
+    const simulateTxBytes = buildTransactionBytes({
+      instructions: simInstructions,
+      payer: wallet,
+      recentBlockhash: blockhash.blockhash,
+    });
+
+    const simResult = await simulateTransaction(
+      base64Encode(simulateTxBytes),
+      rpcUrl,
+    );
+
+    const simulatedCU = simResult.unitsConsumed || 200000;
+    // baseFee: 5000 lamports; priorityFee: CU * 1000 micro-lamports / 1,000,000
+    const totalLamports = 5000 + Math.ceil((simulatedCU * 1000) / 1_000_000);
+    return totalLamports / Math.pow(10, 9); // convert lamports to XNT/SOL
+  } catch (error) {
+    console.warn('[send] Fee estimation failed, using fallback:', error);
+    return FALLBACK_FEE;
+  }
+}
+
 // ==================== Execute Send ====================
 
 /**

@@ -45,6 +45,7 @@ import {fetchAllTokens, PortfolioToken} from './src/portfolio';
 import {
   isValidSolanaAddress,
   executeSend,
+  estimateSendFeeForDisplay,
   loadSendHistory,
   addSendHistory,
   formatTimeAgo,
@@ -145,6 +146,7 @@ function App(): JSX.Element {
     'X1' | 'Solana' | 'All'
   >('X1');
   const [fromSearchQuery, setFromSearchQuery] = useState('');
+  const [showSwapConfirmModal, setShowSwapConfirmModal] = useState(false);
   const [swapSuccessModalVisible, setSwapSuccessModalVisible] = useState(false);
   const [swapSuccessTxId, setSwapSuccessTxId] = useState('');
 
@@ -550,6 +552,34 @@ function App(): JSX.Element {
     setFromSearchQuery('');
   };
 
+  const handleConfirmSwap = () => {
+    if (!swapFromToken) {
+      Alert.alert('Error', 'Please select a token to swap from');
+      return;
+    }
+    if (!swapToToken) {
+      Alert.alert('Error', 'Please select a token to swap to');
+      return;
+    }
+    const amount = parseFloat(swapFromAmount);
+    if (!swapFromAmount || isNaN(amount) || amount <= 0) {
+      Alert.alert('Error', 'Please enter a valid amount');
+      return;
+    }
+    if (amount > swapFromToken.balance) {
+      Alert.alert(
+        'Insufficient balance',
+        `You only have ${swapFromToken.balance} ${swapFromToken.symbol}`,
+      );
+      return;
+    }
+    if (!swapQuoteRate) {
+      Alert.alert('Error', 'No exchange rate available for this pair');
+      return;
+    }
+    setShowSwapConfirmModal(true);
+  };
+
   const handleExecuteSwap = async () => {
     if (
       !swapFromToken ||
@@ -559,6 +589,7 @@ function App(): JSX.Element {
     ) {
       return;
     }
+    setShowSwapConfirmModal(false);
     const amount = parseFloat(swapFromAmount);
     if (isNaN(amount) || amount <= 0) {
       Alert.alert('Invalid amount', 'Please enter a valid amount');
@@ -756,8 +787,24 @@ function App(): JSX.Element {
       return;
     }
 
-    // Show confirmation modal
+    // Reset fee estimate while calculating
+    setSendFeeEstimate(null);
+
+    // Show confirmation modal immediately, fee will update async
     setShowSendConfirmModal(true);
+
+    // Estimate fee via on-chain simulation in background
+    estimateSendFeeForDisplay({
+      network: sendToken.network,
+      token: sendToken,
+      recipient: sendRecipient,
+      amount,
+      wallet: publicKey,
+    })
+      .then(fee => setSendFeeEstimate(fee))
+      .catch(() =>
+        setSendFeeEstimate(sendToken.network === 'X1' ? 0.001 : 0.0001),
+      );
   };
 
   const handleExecuteSend = async () => {
@@ -1387,6 +1434,105 @@ function App(): JSX.Element {
     );
   };
 
+  // ── Swap Confirm Modal ────────────────────────────────────────────────────────
+  const renderSwapConfirmModal = () => {
+    if (!swapFromToken || !swapToToken) {
+      return null;
+    }
+    const fromAmount = parseFloat(swapFromAmount);
+    const toAmount = parseFloat(swapToAmount);
+    const network = swapNetwork === 'X1 Mainnet' ? 'X1' : 'Solana';
+    const accentColor =
+      swapNetwork === 'Solana Mainnet' ? '#9945FF' : '#38B6FF';
+    // X1: fixed ~0.001 XNT; Solana: ~0.0001 SOL based on testing
+    const estimatedFee = swapNetwork === 'X1 Mainnet' ? 0.001 : 0.0001;
+
+    return (
+      <Modal
+        visible={showSwapConfirmModal}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setShowSwapConfirmModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.swapSuccessModal}>
+            <Text style={styles.swapSuccessTitle}>Confirm Swap</Text>
+
+            <View style={styles.swapSuccessRow}>
+              <Text style={styles.swapSuccessLabel}>From</Text>
+              <View style={styles.swapSuccessValueRow}>
+                <Text style={styles.swapSuccessValue}>
+                  {fromAmount} {swapFromToken.symbol}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.swapSuccessRow}>
+              <Text style={styles.swapSuccessLabel}>To</Text>
+              <View style={styles.swapSuccessValueRow}>
+                <Text style={styles.swapSuccessValue}>
+                  {toAmount.toFixed(Math.min(swapToToken.decimals, 6))}{' '}
+                  {swapToToken.symbol}
+                </Text>
+              </View>
+            </View>
+
+            {swapQuoteRate && (
+              <View style={styles.swapSuccessRow}>
+                <Text style={styles.swapSuccessLabel}>Rate</Text>
+                <View style={styles.swapSuccessValueRow}>
+                  <Text style={styles.swapSuccessValue}>
+                    1 {swapFromToken.symbol} = {swapQuoteRate.toFixed(6)}{' '}
+                    {swapToToken.symbol}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            <View style={styles.swapSuccessRow}>
+              <Text style={styles.swapSuccessLabel}>Network</Text>
+              <View style={styles.swapSuccessValueRow}>
+                <Text style={styles.swapSuccessValue}>{network}</Text>
+              </View>
+            </View>
+
+            <View style={styles.swapSuccessRow}>
+              <Text style={styles.swapSuccessLabel}>Est. Fee</Text>
+              <View style={styles.swapSuccessValueRow}>
+                <Text style={styles.swapSuccessValue}>
+                  ~{estimatedFee.toFixed(6)} {network === 'X1' ? 'XNT' : 'SOL'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={{flexDirection: 'row', gap: 12, marginTop: 24}}>
+              <TouchableOpacity
+                style={[
+                  styles.swapSuccessCloseBtn,
+                  {backgroundColor: '#333', flex: 1},
+                ]}
+                onPress={() => setShowSwapConfirmModal(false)}>
+                <Text style={styles.swapSuccessCloseBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.swapSuccessCloseBtn,
+                  {backgroundColor: accentColor, flex: 1},
+                ]}
+                onPress={handleExecuteSwap}
+                disabled={isExecutingSwap}>
+                {isExecutingSwap ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.swapSuccessCloseBtnText}>Confirm</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   // ── Swap Success Modal ────────────────────────────────────────────────────────
   const renderSwapSuccessModal = () => {
     const txId = swapSuccessTxId;
@@ -1709,7 +1855,7 @@ function App(): JSX.Element {
                 : styles.swapButtonDisabled,
             ]}
             disabled={!canSwap}
-            onPress={handleExecuteSwap}>
+            onPress={handleConfirmSwap}>
             {isExecutingSwap ? (
               <ActivityIndicator color="#fff" />
             ) : (
@@ -1725,6 +1871,9 @@ function App(): JSX.Element {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* Swap Confirm Modal */}
+        {renderSwapConfirmModal()}
 
         {/* Swap Success Modal */}
         {renderSwapSuccessModal()}
@@ -1930,17 +2079,19 @@ function App(): JSX.Element {
               </View>
             </View>
 
-            {sendFeeEstimate !== null && (
-              <View style={styles.swapSuccessRow}>
-                <Text style={styles.swapSuccessLabel}>Est. Fee</Text>
-                <View style={styles.swapSuccessValueRow}>
-                  <Text style={styles.swapSuccessValue}>
-                    {sendFeeEstimate.toFixed(6)}{' '}
-                    {sendToken.network === 'X1' ? 'XNT' : 'SOL'}
-                  </Text>
-                </View>
+            <View style={styles.swapSuccessRow}>
+              <Text style={styles.swapSuccessLabel}>Est. Fee</Text>
+              <View style={styles.swapSuccessValueRow}>
+                <Text style={styles.swapSuccessValue}>
+                  {sendFeeEstimate !== null
+                    ? '~' +
+                      sendFeeEstimate.toFixed(6) +
+                      ' ' +
+                      (sendToken.network === 'X1' ? 'XNT' : 'SOL')
+                    : 'Calculating...'}
+                </Text>
               </View>
-            )}
+            </View>
 
             <View style={{flexDirection: 'row', gap: 12, marginTop: 24}}>
               <TouchableOpacity
