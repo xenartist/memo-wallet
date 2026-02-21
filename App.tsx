@@ -52,6 +52,7 @@ import {
 } from './src/send';
 import QRScanner from './src/QRScanner';
 import QRCode from 'react-native-qrcode-svg';
+import {WebView} from 'react-native-webview';
 
 // Default swap tokens shown immediately on first load (balance filled in after API loads)
 const MEMO_MINT = 'memoX1sJsBY6od7CfQ58XooRALwnocAZen4L7mW1ick';
@@ -169,6 +170,10 @@ function App(): JSX.Element {
 
   // ── Receive state ───────────────────────────────────────────────────────────
   // (No state needed - only displays address and QR code)
+
+  // ── WebView state ───────────────────────────────────────────────────────────
+  const [showWebView, setShowWebView] = useState(false);
+  const [webViewUrl, setWebViewUrl] = useState('');
 
   // Look up balance for a swap token from the already-loaded portfolio data.
   // Matching is done via apiMint (normalises native variants) + network.
@@ -1403,6 +1408,11 @@ function App(): JSX.Element {
       Alert.alert('Copied', `${label} copied to clipboard`);
     };
 
+    const openExplorer = () => {
+      setWebViewUrl(explorerUrl);
+      setShowWebView(true);
+    };
+
     return (
       <Modal
         visible={swapSuccessModalVisible}
@@ -1432,19 +1442,22 @@ function App(): JSX.Element {
             </View>
 
             {/* Explorer URL */}
-            <View style={styles.swapSuccessRow}>
+            <TouchableOpacity
+              style={styles.swapSuccessRow}
+              onPress={openExplorer}
+              activeOpacity={0.7}>
               <Text style={styles.swapSuccessLabel}>Explorer</Text>
               <View style={styles.swapSuccessValueRow}>
                 <Text style={styles.swapSuccessValue} numberOfLines={1}>
                   {explorerUrl.slice(0, 30)}...
                 </Text>
-                <TouchableOpacity
-                  onPress={() => copyToClipboard(explorerUrl, 'Explorer URL')}
-                  style={styles.swapSuccessCopyBtn}>
-                  <FontAwesome name="copy" size={16} color={accentColor} />
-                </TouchableOpacity>
+                <FontAwesome
+                  name="external-link"
+                  size={16}
+                  color={accentColor}
+                />
               </View>
-            </View>
+            </TouchableOpacity>
 
             {/* Close Button */}
             <TouchableOpacity
@@ -1504,6 +1517,37 @@ function App(): JSX.Element {
           </View>
         </ScrollView>
       </View>
+    );
+  };
+
+  // ── WebView Modal ─────────────────────────────────────────────────────────────
+  const renderWebViewModal = () => {
+    return (
+      <Modal
+        visible={showWebView}
+        animationType="slide"
+        onRequestClose={() => setShowWebView(false)}>
+        <View style={styles.webViewContainer}>
+          <View style={styles.webViewHeader}>
+            <Text style={styles.webViewTitle}>Transaction Explorer</Text>
+            <TouchableOpacity
+              onPress={() => setShowWebView(false)}
+              style={styles.webViewCloseButton}>
+              <FontAwesome name="times" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
+          <WebView
+            source={{uri: webViewUrl}}
+            style={styles.webView}
+            startInLoadingState={true}
+            renderLoading={() => (
+              <View style={styles.webViewLoading}>
+                <ActivityIndicator size="large" color="#38B6FF" />
+              </View>
+            )}
+          />
+        </View>
+      </Modal>
     );
   };
 
@@ -1943,6 +1987,11 @@ function App(): JSX.Element {
       Alert.alert('Copied', `${label} copied to clipboard`);
     };
 
+    const openExplorer = () => {
+      setWebViewUrl(explorerUrl);
+      setShowWebView(true);
+    };
+
     return (
       <Modal
         visible={sendSuccessModalVisible}
@@ -1970,19 +2019,22 @@ function App(): JSX.Element {
               </View>
             </View>
 
-            <View style={styles.swapSuccessRow}>
+            <TouchableOpacity
+              style={styles.swapSuccessRow}
+              onPress={openExplorer}
+              activeOpacity={0.7}>
               <Text style={styles.swapSuccessLabel}>Explorer</Text>
               <View style={styles.swapSuccessValueRow}>
                 <Text style={styles.swapSuccessValue} numberOfLines={1}>
                   {explorerUrl.slice(0, 30)}...
                 </Text>
-                <TouchableOpacity
-                  onPress={() => copyToClipboard(explorerUrl, 'Explorer URL')}
-                  style={styles.swapSuccessCopyBtn}>
-                  <FontAwesome name="copy" size={16} color={accentColor} />
-                </TouchableOpacity>
+                <FontAwesome
+                  name="external-link"
+                  size={16}
+                  color={accentColor}
+                />
               </View>
-            </View>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={[
@@ -2358,6 +2410,8 @@ function App(): JSX.Element {
           </View>
         )}
       </View>
+      {/* WebView Modal */}
+      {renderWebViewModal()}
     </SafeAreaView>
   );
 }
@@ -3449,6 +3503,43 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 10,
     fontWeight: '600',
+  },
+  // ── WebView styles ──────────────────────────────────────────────────────────
+  webViewContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  webViewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#111',
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  webViewTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  webViewCloseButton: {
+    padding: 8,
+  },
+  webView: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  webViewLoading: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000',
   },
 });
 
