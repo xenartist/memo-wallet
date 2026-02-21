@@ -495,47 +495,42 @@ function App(): JSX.Element {
 
   const handleSelectFromToken = (token: SwapToken) => {
     const newNetwork = token.network === 'X1' ? 'X1 Mainnet' : 'Solana Mainnet';
-    const previousNetwork = swapFromToken?.network;
-    const networkChanged = previousNetwork && previousNetwork !== token.network;
 
     setSwapFromToken(token);
     setSwapNetwork(newNetwork);
 
-    // If network changed, auto-select appropriate To token
-    if (networkChanged) {
-      if (token.network === 'X1') {
-        // Switched from Solana → X1
-        if (token.symbol === 'XNT') {
-          // From = XNT → To = MEMO
-          const memoToken = swapTokenList.find(
-            t => t.symbol === 'MEMO' && t.network === 'X1',
-          );
-          setSwapToToken(memoToken || null);
-        } else {
-          // From = other X1 token → To = XNT
-          const xntToken = swapTokenList.find(
-            t => t.symbol === 'XNT' && t.network === 'X1',
-          );
-          setSwapToToken(xntToken || null);
-        }
+    // Auto-select To token based on From token's network and symbol
+    if (token.network === 'X1') {
+      // X1 network: XNT → MEMO, non-XNT → XNT
+      if (token.symbol === 'XNT') {
+        // Try swapTokenList first, fallback to DEFAULT_TO_TOKEN (MEMO)
+        const memoToken =
+          swapTokenList.find(t => t.symbol === 'MEMO' && t.network === 'X1') ||
+          DEFAULT_TO_TOKEN;
+        setSwapToToken(memoToken);
       } else {
-        // Switched from X1 → Solana
-        if (token.symbol === 'SOL') {
-          // From = SOL → To = solXEN
-          const solXENToken = solanaDefaultTokens.find(
-            t => t.symbol === 'solXEN',
-          );
-          setSwapToToken(solXENToken || null);
-        } else {
-          // From = other Solana token → To = SOL
-          const solToken = solanaDefaultTokens.find(t => t.symbol === 'SOL');
-          setSwapToToken(solToken || null);
-        }
+        // Try swapTokenList first, fallback to DEFAULT_FROM_TOKEN (XNT)
+        const xntToken =
+          swapTokenList.find(t => t.symbol === 'XNT' && t.network === 'X1') ||
+          DEFAULT_FROM_TOKEN;
+        setSwapToToken(xntToken);
       }
     } else {
-      // Same network, only clear if same mint
-      if (swapToToken?.mint === token.mint) {
-        setSwapToToken(null);
+      // Solana network: SOL → solXEN, non-SOL → SOL
+      if (token.symbol === 'SOL') {
+        // Try solanaDefaultTokens first (faster), then swapTokenList
+        const solXENToken =
+          solanaDefaultTokens.find(t => t.symbol === 'solXEN') ||
+          swapTokenList.find(
+            t => t.symbol === 'solXEN' && t.network === 'Solana',
+          );
+        setSwapToToken(solXENToken || null);
+      } else {
+        // Try solanaDefaultTokens first (faster), then swapTokenList
+        const solToken =
+          solanaDefaultTokens.find(t => t.symbol === 'SOL') ||
+          swapTokenList.find(t => t.symbol === 'SOL' && t.network === 'Solana');
+        setSwapToToken(solToken || null);
       }
     }
 
