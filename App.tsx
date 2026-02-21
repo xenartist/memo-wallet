@@ -503,17 +503,17 @@ function App(): JSX.Element {
     if (token.network === 'X1') {
       // X1 network: XNT → MEMO, non-XNT → XNT
       if (token.symbol === 'XNT') {
-        // Try swapTokenList first, fallback to DEFAULT_TO_TOKEN (MEMO)
+        // Try DEFAULT_TO_TOKEN first (faster), then swapTokenList
         const memoToken =
-          swapTokenList.find(t => t.symbol === 'MEMO' && t.network === 'X1') ||
-          DEFAULT_TO_TOKEN;
-        setSwapToToken(memoToken);
+          DEFAULT_TO_TOKEN ||
+          swapTokenList.find(t => t.symbol === 'MEMO' && t.network === 'X1');
+        setSwapToToken(memoToken || null);
       } else {
-        // Try swapTokenList first, fallback to DEFAULT_FROM_TOKEN (XNT)
+        // Try DEFAULT_FROM_TOKEN first (faster), then swapTokenList
         const xntToken =
-          swapTokenList.find(t => t.symbol === 'XNT' && t.network === 'X1') ||
-          DEFAULT_FROM_TOKEN;
-        setSwapToToken(xntToken);
+          DEFAULT_FROM_TOKEN ||
+          swapTokenList.find(t => t.symbol === 'XNT' && t.network === 'X1');
+        setSwapToToken(xntToken || null);
       }
     } else {
       // Solana network: SOL → solXEN, non-SOL → SOL
