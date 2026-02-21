@@ -196,6 +196,8 @@ export interface PoolPair {
   token2Symbol: string;
   token2Logo: string | null;
   status: number; // 0 = active
+  amount1: number; // token1 reserve (excluding fees)
+  amount2: number; // token2 reserve (excluding fees)
 }
 
 export async function fetchPoolList(network: SwapNetwork): Promise<PoolPair[]> {
@@ -230,6 +232,8 @@ export async function fetchPoolList(network: SwapNetwork): Promise<PoolPair[]> {
           : `https://x1logos.s3.us-east-1.amazonaws.com/${p.token2_logo}`
         : null,
       status: p.pool_info?.status ?? 0,
+      amount1: p.amount1_without_fee ?? 0,
+      amount2: p.amount2_without_fee ?? 0,
     }));
   } catch (error) {
     console.error('[Swap] Failed to fetch pool list:', error);

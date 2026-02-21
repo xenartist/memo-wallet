@@ -1205,22 +1205,53 @@ function App(): JSX.Element {
         network: p.network,
       }));
 
-    // xDEX To list (X1 network)
+    // xDEX To list (X1 network): filter by active pool, then sort by From
+    // token's reserve amount in the pool (highest liquidity depth first)
     const fromApiMint = swapFromToken?.apiMint ?? '';
-    const xdexToTokens = swapTokenList.filter(t => {
-      if (!swapFromToken) {
-        return false;
-      }
-      const candidateApiMint = t.apiMint;
-      return swapPoolList.some(
-        pool =>
-          pool.status === 0 &&
-          ((pool.token1Mint === fromApiMint &&
-            pool.token2Mint === candidateApiMint) ||
-            (pool.token2Mint === fromApiMint &&
-              pool.token1Mint === candidateApiMint)),
-      );
-    });
+    const xdexToTokens = swapTokenList
+      .filter(t => {
+        if (!swapFromToken) {
+          return false;
+        }
+        const candidateApiMint = t.apiMint;
+        return swapPoolList.some(
+          pool =>
+            pool.status === 0 &&
+            ((pool.token1Mint === fromApiMint &&
+              pool.token2Mint === candidateApiMint) ||
+              (pool.token2Mint === fromApiMint &&
+                pool.token1Mint === candidateApiMint)),
+        );
+      })
+      .sort((a, b) => {
+        // When From is XNT, MEMO always goes first
+        const isXNTFrom = swapFromToken?.symbol === 'XNT';
+        if (isXNTFrom) {
+          if (a.apiMint === MEMO_MINT) {
+            return -1;
+          }
+          if (b.apiMint === MEMO_MINT) {
+            return 1;
+          }
+        }
+        // Find the pool for each To candidate and get the From token's amount
+        const getFromAmount = (candidateMint: string): number => {
+          const pool = swapPoolList.find(
+            p =>
+              p.status === 0 &&
+              ((p.token1Mint === fromApiMint &&
+                p.token2Mint === candidateMint) ||
+                (p.token2Mint === fromApiMint &&
+                  p.token1Mint === candidateMint)),
+          );
+          if (!pool) {
+            return 0;
+          }
+          // Return the amount of the From token in this pool
+          return pool.token1Mint === fromApiMint ? pool.amount1 : pool.amount2;
+        };
+        return getFromAmount(b.apiMint) - getFromAmount(a.apiMint);
+      });
 
     // Jupiter To list: search results if query present, else default list
     const jupiterToTokens = isJupiterToSelector
