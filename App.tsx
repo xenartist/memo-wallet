@@ -41,7 +41,9 @@ import {
   searchJupiterTokens,
   executeJupiterSwap,
 } from './src/swap';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {fetchAllTokens, PortfolioToken} from './src/portfolio';
+import {X1_RPC_URL, SOLANA_RPC_URL, setCustomRpcUrls} from './src/rpc';
 import {
   isValidSolanaAddress,
   executeSend,
@@ -170,6 +172,12 @@ function App(): JSX.Element {
   const [isAddressValid, setIsAddressValid] = useState<boolean | null>(null);
   const [showQRScanner, setShowQRScanner] = useState(false);
 
+  // ── Settings / RPC state ────────────────────────────────────────────────────
+  const [x1RpcUrl, setX1RpcUrl] = useState(X1_RPC_URL);
+  const [solanaRpcUrl, setSolanaRpcUrl] = useState(SOLANA_RPC_URL);
+  const [x1RpcInput, setX1RpcInput] = useState(X1_RPC_URL);
+  const [solanaRpcInput, setSolanaRpcInput] = useState(SOLANA_RPC_URL);
+
   // ── Receive state ───────────────────────────────────────────────────────────
   // (No state needed - only displays address and QR code)
 
@@ -205,6 +213,28 @@ function App(): JSX.Element {
       }
     };
     initAuth();
+  }, []);
+
+  // Load saved RPC URLs from storage on mount and inject into rpc.ts
+  useEffect(() => {
+    const loadRpcUrls = async () => {
+      try {
+        const [savedX1, savedSolana] = await Promise.all([
+          AsyncStorage.getItem('rpc_url_x1'),
+          AsyncStorage.getItem('rpc_url_solana'),
+        ]);
+        const x1 = savedX1 || X1_RPC_URL;
+        const sol = savedSolana || SOLANA_RPC_URL;
+        setX1RpcUrl(x1);
+        setSolanaRpcUrl(sol);
+        setX1RpcInput(x1);
+        setSolanaRpcInput(sol);
+        setCustomRpcUrls(x1, sol);
+      } catch (err) {
+        console.warn('[App] Failed to load RPC URLs:', err);
+      }
+    };
+    loadRpcUrls();
   }, []);
 
   // Load swap token list whenever we enter the swap tab or the network changes
@@ -1057,6 +1087,37 @@ function App(): JSX.Element {
     </View>
   );
 
+  const handleSaveRpcUrls = async () => {
+    const x1 = x1RpcInput.trim() || X1_RPC_URL;
+    const sol = solanaRpcInput.trim() || SOLANA_RPC_URL;
+    setX1RpcUrl(x1);
+    setSolanaRpcUrl(sol);
+    setX1RpcInput(x1);
+    setSolanaRpcInput(sol);
+    setCustomRpcUrls(x1, sol);
+    try {
+      await AsyncStorage.setItem('rpc_url_x1', x1);
+      await AsyncStorage.setItem('rpc_url_solana', sol);
+      Alert.alert('Saved', 'RPC URLs updated successfully');
+    } catch (err) {
+      Alert.alert('Error', 'Failed to save RPC URLs');
+    }
+  };
+
+  const handleResetRpcUrls = async () => {
+    setX1RpcInput(X1_RPC_URL);
+    setSolanaRpcInput(SOLANA_RPC_URL);
+    setX1RpcUrl(X1_RPC_URL);
+    setSolanaRpcUrl(SOLANA_RPC_URL);
+    setCustomRpcUrls(X1_RPC_URL, SOLANA_RPC_URL);
+    try {
+      await AsyncStorage.removeItem('rpc_url_x1');
+      await AsyncStorage.removeItem('rpc_url_solana');
+    } catch (err) {
+      console.warn('[App] Failed to clear RPC URLs:', err);
+    }
+  };
+
   const renderSettingsScreen = () => (
     <View style={styles.screenContainer}>
       <View style={styles.screenHeader}>
@@ -1068,7 +1129,63 @@ function App(): JSX.Element {
         <Text style={styles.screenTitle}>Settings</Text>
         <View style={styles.placeholder} />
       </View>
-      <View style={styles.settingsContent}>
+      <ScrollView style={styles.settingsContent}>
+        {/* RPC Settings */}
+        <Text style={styles.settingsSectionTitle}>RPC Endpoints</Text>
+
+        <View style={[styles.rpcSettingItem, {borderColor: '#38B6FF'}]}>
+          <Text style={[styles.rpcLabel, {color: '#38B6FF'}]}>X1 Mainnet</Text>
+          <TextInput
+            style={styles.rpcInput}
+            value={x1RpcInput}
+            onChangeText={setX1RpcInput}
+            placeholder={X1_RPC_URL}
+            placeholderTextColor="#555"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+          />
+          {x1RpcUrl !== X1_RPC_URL && (
+            <Text style={styles.rpcCustomBadge}>Custom</Text>
+          )}
+        </View>
+
+        <View style={[styles.rpcSettingItem, {borderColor: '#9945FF'}]}>
+          <Text style={[styles.rpcLabel, {color: '#9945FF'}]}>
+            Solana Mainnet
+          </Text>
+          <TextInput
+            style={styles.rpcInput}
+            value={solanaRpcInput}
+            onChangeText={setSolanaRpcInput}
+            placeholder={SOLANA_RPC_URL}
+            placeholderTextColor="#555"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+          />
+          {solanaRpcUrl !== SOLANA_RPC_URL && (
+            <Text style={[styles.rpcCustomBadge, {color: '#9945FF'}]}>
+              Custom
+            </Text>
+          )}
+        </View>
+
+        <View style={styles.rpcButtonRow}>
+          <TouchableOpacity
+            style={[styles.rpcButton, {backgroundColor: '#38B6FF'}]}
+            onPress={handleSaveRpcUrls}>
+            <Text style={styles.rpcButtonText}>Save</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.rpcButton, {backgroundColor: '#333'}]}
+            onPress={handleResetRpcUrls}>
+            <Text style={styles.rpcButtonText}>Reset to Default</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Danger Zone */}
+        <Text style={styles.settingsSectionTitle}>Account</Text>
         <TouchableOpacity
           style={[styles.settingItem, styles.dangerItem]}
           onPress={() => {
@@ -1081,7 +1198,7 @@ function App(): JSX.Element {
             Remove Authorization
           </Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </View>
   );
 
@@ -3717,6 +3834,63 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#000',
+  },
+  settingsSectionTitle: {
+    color: '#888',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginTop: 24,
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  rpcSettingItem: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  rpcLabel: {
+    color: '#aaa',
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  rpcInput: {
+    color: '#fff',
+    fontSize: 13,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    backgroundColor: '#111',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  rpcCustomBadge: {
+    color: '#38B6FF',
+    fontSize: 11,
+    marginTop: 4,
+    fontWeight: '600',
+  },
+  rpcButtonRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  rpcButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  rpcButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

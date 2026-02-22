@@ -8,8 +8,19 @@ export const SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com';
 
 export type SwapNetwork = 'X1 Mainnet' | 'Solana Mainnet';
 
+// Mutable RPC config — overridable at runtime by the app
+const _rpcConfig = {
+  x1: X1_RPC_URL,
+  solana: SOLANA_RPC_URL,
+};
+
+export function setCustomRpcUrls(x1: string, solana: string): void {
+  _rpcConfig.x1 = x1 || X1_RPC_URL;
+  _rpcConfig.solana = solana || SOLANA_RPC_URL;
+}
+
 export function rpcUrlForNetwork(network: SwapNetwork): string {
-  return network === 'Solana Mainnet' ? SOLANA_RPC_URL : X1_RPC_URL;
+  return network === 'Solana Mainnet' ? _rpcConfig.solana : _rpcConfig.x1;
 }
 
 // ==================== Mint Addresses ====================
