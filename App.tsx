@@ -22,6 +22,7 @@ import {
   SeedVault,
   SeedVaultPermissionAndroid,
 } from '@solana-mobile/seed-vault-lib';
+import type {Account as SeedVaultAccount} from '@solana-mobile/seed-vault-lib';
 import FontAwesome from '@react-native-vector-icons/fontawesome';
 
 import {
@@ -139,6 +140,13 @@ function App(): JSX.Element {
     'from' | 'to' | null
   >(null);
   const [derivationPath, setDerivationPath] = useState<string>('');
+
+  // ── Account Picker state ─────────────────────────────────────────────────────
+  const [accountPickerVisible, setAccountPickerVisible] = useState(false);
+  const [pendingAccounts, setPendingAccounts] = useState<SeedVaultAccount[]>(
+    [],
+  );
+  const [pendingAuthToken, setPendingAuthToken] = useState<number | null>(null);
   const [jupiterSearchQuery, setJupiterSearchQuery] = useState('');
   const [jupiterSearchResults, setJupiterSearchResults] = useState<SwapToken[]>(
     [],
@@ -368,18 +376,42 @@ function App(): JSX.Element {
     setRefreshing(false);
   }, [publicKey]);
 
+  const applyAccount = async (authToken: number, account: SeedVaultAccount) => {
+    // Persist the chosen account so next connect skips the picker
+    await AsyncStorage.setItem(
+      'selected_account_pubkey',
+      account.publicKeyEncoded,
+    );
+    setPublicKey(account.publicKeyEncoded);
+    setCurrentAuthToken(authToken);
+    setDerivationPath(account.derivationPath);
+    setConnected(true);
+    await fetchBalances(account.publicKeyEncoded);
+  };
+
   const getAccountInfo = async (authToken: number) => {
     const accounts = await SeedVault.getUserWallets(authToken);
-    if (accounts.length > 0) {
-      const account = accounts[0];
-      setPublicKey(account.publicKeyEncoded);
-      setConnected(true);
-      setCurrentAuthToken(authToken);
-
-      await fetchBalances(account.publicKeyEncoded);
-    } else {
+    if (accounts.length === 0) {
       Alert.alert('No Accounts', 'No accounts found in Seed Vault');
+      return;
     }
+    if (accounts.length === 1) {
+      await applyAccount(authToken, accounts[0]);
+      return;
+    }
+    // Multiple accounts: check if user already chose one previously
+    const savedPubkey = await AsyncStorage.getItem('selected_account_pubkey');
+    if (savedPubkey) {
+      const saved = accounts.find(a => a.publicKeyEncoded === savedPubkey);
+      if (saved) {
+        await applyAccount(authToken, saved);
+        return;
+      }
+    }
+    // No saved choice yet — show picker
+    setPendingAccounts(accounts);
+    setPendingAuthToken(authToken);
+    setAccountPickerVisible(true);
   };
 
   const connectSeedVault = async () => {
@@ -413,6 +445,8 @@ function App(): JSX.Element {
   };
 
   const disconnect = (): void => {
+    // Clear saved account so next connect shows picker again
+    AsyncStorage.removeItem('selected_account_pubkey');
     setConnected(false);
     setPublicKey('');
     setBalance('');
@@ -1809,6 +1843,63 @@ function App(): JSX.Element {
     );
   };
 
+  // ── Account Picker Modal ──────────────────────────────────────────────────────
+  const renderAccountPickerModal = () => (
+    <Modal
+      visible={accountPickerVisible}
+      animationType="slide"
+      transparent
+      onRequestClose={() => setAccountPickerVisible(false)}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Select Account</Text>
+          </View>
+          <Text style={styles.accountPickerSubtitle}>
+            Multiple accounts found. Choose one to import.
+          </Text>
+          <FlatList
+            data={pendingAccounts}
+            keyExtractor={item => String(item.id)}
+            renderItem={({item, index}) => {
+              const pk = item.publicKeyEncoded;
+              const shortPk =
+                pk.length > 12 ? `${pk.slice(0, 6)}...${pk.slice(-6)}` : pk;
+              const displayName =
+                item.name && item.name.trim().length > 0
+                  ? item.name.trim()
+                  : `Account ${index + 1}`;
+              return (
+                <TouchableOpacity
+                  style={styles.accountPickerItem}
+                  onPress={async () => {
+                    setAccountPickerVisible(false);
+                    if (pendingAuthToken !== null) {
+                      await applyAccount(pendingAuthToken, item);
+                    }
+                    setPendingAccounts([]);
+                    setPendingAuthToken(null);
+                  }}>
+                  <View style={styles.accountPickerIcon}>
+                    <FontAwesome name="user-circle" size={32} color="#38B6FF" />
+                  </View>
+                  <View style={styles.accountPickerInfo}>
+                    <Text style={styles.accountPickerName}>{displayName}</Text>
+                    <Text style={styles.accountPickerAddress}>{shortPk}</Text>
+                    <Text style={styles.accountPickerPath}>
+                      {item.derivationPath}
+                    </Text>
+                  </View>
+                  <FontAwesome name="chevron-right" size={14} color="#555" />
+                </TouchableOpacity>
+              );
+            }}
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+
   // ── WebView Modal ─────────────────────────────────────────────────────────────
   const renderWebViewModal = () => {
     return (
@@ -2704,6 +2795,8 @@ function App(): JSX.Element {
           </View>
         )}
       </View>
+      {/* Account Picker Modal */}
+      {renderAccountPickerModal()}
       {/* WebView Modal */}
       {renderWebViewModal()}
     </SafeAreaView>
@@ -3891,6 +3984,46 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
+  },
+
+  // ── Account Picker styles ────────────────────────────────────────────────────
+  accountPickerSubtitle: {
+    color: '#888',
+    fontSize: 13,
+    marginBottom: 16,
+    paddingHorizontal: 4,
+    lineHeight: 18,
+  },
+  accountPickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+  },
+  accountPickerIcon: {
+    marginRight: 14,
+  },
+  accountPickerInfo: {
+    flex: 1,
+  },
+  accountPickerName: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  accountPickerAddress: {
+    color: '#38B6FF',
+    fontSize: 12,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    marginBottom: 2,
+  },
+  accountPickerPath: {
+    color: '#555',
+    fontSize: 11,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
 });
 
