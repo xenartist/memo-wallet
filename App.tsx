@@ -214,6 +214,16 @@ function App(): JSX.Element {
           setIsAuthorized(false);
           return;
         }
+        // Must check permission before calling getAuthorizedSeeds(),
+        // otherwise it throws a native SecurityException crash on release builds
+        // where the app hasn't been granted Seed Vault access yet.
+        const hasPermission = await PermissionsAndroid.check(
+          SeedVaultPermissionAndroid,
+        );
+        if (!hasPermission) {
+          setIsAuthorized(false);
+          return;
+        }
         const authorizedSeeds = await SeedVault.getAuthorizedSeeds();
         setIsAuthorized(authorizedSeeds.length > 0);
       } catch (error) {
@@ -538,10 +548,10 @@ function App(): JSX.Element {
     // Fetch immediately when tokens change
     fetchQuoteRate();
 
-    // Set up 30-second interval to refresh quote
+    // Set up 60-second interval to refresh quote
     const intervalId = setInterval(() => {
       fetchQuoteRate();
-    }, 30000);
+    }, 60000);
 
     return () => clearInterval(intervalId);
   }, [swapFromToken, swapToToken, swapNetwork, fetchQuoteRate]);
@@ -947,6 +957,7 @@ function App(): JSX.Element {
       </TouchableOpacity>
 
       <Text style={styles.hint}>Powered by X1 & Solana</Text>
+      <Text style={styles.versionText}>v1.0</Text>
     </View>
   );
 
@@ -1219,6 +1230,7 @@ function App(): JSX.Element {
             Remove Authorization
           </Text>
         </TouchableOpacity>
+        <Text style={styles.settingsVersionText}>v1.0</Text>
       </ScrollView>
     </View>
   );
@@ -2831,6 +2843,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 24,
   },
+  versionText: {
+    color: '#444',
+    fontSize: 11,
+    marginTop: 8,
+  },
   button: {
     backgroundColor: '#38B6FF',
     paddingVertical: 16,
@@ -3922,6 +3939,13 @@ const styles = StyleSheet.create({
     marginTop: 24,
     marginBottom: 8,
     paddingHorizontal: 4,
+  },
+  settingsVersionText: {
+    color: '#444',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 32,
+    marginBottom: 16,
   },
   rpcSettingItem: {
     backgroundColor: '#1a1a1a',

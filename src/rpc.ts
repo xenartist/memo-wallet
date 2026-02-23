@@ -4,7 +4,7 @@ import {getAssociatedTokenAddress, TOKEN_PROGRAM_ID} from '@solana/spl-token';
 
 // ==================== RPC Endpoints ====================
 export const X1_RPC_URL = 'https://rpc.mainnet.x1.xyz';
-export const SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com';
+export const SOLANA_RPC_URL = 'https://solana-rpc.publicnode.com';
 
 export type SwapNetwork = 'X1 Mainnet' | 'Solana Mainnet';
 

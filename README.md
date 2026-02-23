@@ -17,7 +17,7 @@ The very first mobile wallet for X1 and Solana blockchain. Exclusive on Solana S
 All RPC utility functions should support an optional `rpcUrl` parameter:
 
 - X1 RPC: `https://rpc.mainnet.x1.xyz`
-- Solana RPC: `https://api.mainnet-beta.solana.com`
+- Solana RPC: `https://solana-rpc.publicnode.com`
 
 ## Development Workflow
 
@@ -51,9 +51,15 @@ adb -s SM02G40619145272 install -r android/app/build/outputs/apk/debug/app-debug
 APK location: `android/app/build/outputs/apk/debug/app-debug.apk`
 
 # Build Release APK
+
+```
 cd android && ./gradlew assembleRelease
 
 APK location: `android/app/build/outputs/apk/release/app-release.apk`
+
+# Install to device
+adb -s SM02G40619145272 install -r android/app/build/outputs/apk/release/app-release.apk
+```
 
 ## Code Style Guidelines
 
