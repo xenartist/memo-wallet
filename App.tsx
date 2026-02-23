@@ -851,24 +851,11 @@ function App(): JSX.Element {
       return;
     }
 
-    // Reset fee estimate while calculating
-    setSendFeeEstimate(null);
+    // Use hardcoded fee estimate to avoid RPC round-trip latency
+    setSendFeeEstimate(sendToken.network === 'X1' ? 0.000005 : 0.000005);
 
-    // Show confirmation modal immediately, fee will update async
+    // Show confirmation modal
     setShowSendConfirmModal(true);
-
-    // Estimate fee via on-chain simulation in background
-    estimateSendFeeForDisplay({
-      network: sendToken.network,
-      token: sendToken,
-      recipient: sendRecipient,
-      amount,
-      wallet: publicKey,
-    })
-      .then(fee => setSendFeeEstimate(fee))
-      .catch(() =>
-        setSendFeeEstimate(sendToken.network === 'X1' ? 0.001 : 0.0001),
-      );
   };
 
   const handleExecuteSend = async () => {
@@ -2322,12 +2309,10 @@ function App(): JSX.Element {
               <Text style={styles.swapSuccessLabel}>Est. Fee</Text>
               <View style={styles.swapSuccessValueRow}>
                 <Text style={styles.swapSuccessValue}>
-                  {sendFeeEstimate !== null
-                    ? '~' +
-                      sendFeeEstimate.toFixed(6) +
-                      ' ' +
-                      (sendToken.network === 'X1' ? 'XNT' : 'SOL')
-                    : 'Calculating...'}
+                  {'~' +
+                    (sendToken.network === 'X1'
+                      ? '0.000005 XNT'
+                      : '0.000005 SOL')}
                 </Text>
               </View>
             </View>

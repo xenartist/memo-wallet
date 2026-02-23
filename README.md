@@ -50,6 +50,11 @@ adb -s SM02G40619145272 install -r android/app/build/outputs/apk/debug/app-debug
 
 APK location: `android/app/build/outputs/apk/debug/app-debug.apk`
 
+# Build Release APK
+cd android && ./gradlew assembleRelease
+
+APK location: `android/app/build/outputs/apk/release/app-release.apk`
+
 ## Code Style Guidelines
 
 ### General Rules
