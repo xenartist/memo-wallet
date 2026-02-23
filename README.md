@@ -62,3 +62,9 @@ APK location: `android/app/build/outputs/apk/debug/app-debug.apk`
 - Use `null` instead of `undefined` for nullable values
 
 ## LICENSE
+
+## PRIVACY POLICY
+
+## COPYRIGHT
+
+© 2026 xen_artist | MEMO Wallet. All rights reserved.
