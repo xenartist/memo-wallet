@@ -2,7 +2,6 @@
 
 The very first mobile wallet for X1 and Solana blockchain. Exclusive on Solana Seeker. Secured by the native Seed Vault.
 
-
 ## Code Organization Principles
 
 ### File Responsibilities
@@ -63,8 +62,12 @@ APK location: `android/app/build/outputs/apk/debug/app-debug.apk`
 
 ## LICENSE
 
-## PRIVACY POLICY
+This project is licensed under the GNU General Public License v3.0. See [LICENSE.txt](LICENSE.txt) for the full license text.
 
 ## COPYRIGHT
 
 © 2026 xen_artist | MEMO Wallet. All rights reserved.
+
+## PRIVACY POLICY
+
+See [PRIVACY-POLICY.md](PRIVACY-POLICY.md) for details.
