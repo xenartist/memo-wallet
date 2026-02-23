@@ -1,6 +1,13 @@
 apply plugin: "com.android.application"
 apply plugin: "com.facebook.react"
 
+// Load keystore signing config from local.properties
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader -> localProperties.load(reader) }
+}
+
 /**
  * This is the configuration block to customize your React Native Android app.
  * By default you don't need to apply any configuration, just uncomment the lines you need.
@@ -78,12 +85,12 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
-	release {
-	    storeFile file(MYAPP_RELEASE_STORE_FILE)
-    	    storePassword MYAPP_RELEASE_STORE_PASSWORD
-    	    keyAlias MYAPP_RELEASE_KEY_ALIAS
-    	    keyPassword MYAPP_RELEASE_KEY_PASSWORD
-	}
+        release {
+            storeFile file(localProperties['RELEASE_STORE_FILE'])
+            storePassword localProperties['RELEASE_STORE_PASSWORD']
+            keyAlias localProperties['RELEASE_KEY_ALIAS']
+            keyPassword localProperties['RELEASE_KEY_PASSWORD']
+        }
     }
     buildTypes {
         debug {
