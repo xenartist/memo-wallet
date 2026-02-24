@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useCallback} from 'react';
+import React, {useState, useEffect, useCallback, useMemo, useRef} from 'react';
 import {
   SafeAreaView,
   StyleSheet,
@@ -186,6 +186,11 @@ function App(): JSX.Element {
   const [x1RpcInput, setX1RpcInput] = useState(X1_RPC_URL);
   const [solanaRpcInput, setSolanaRpcInput] = useState(SOLANA_RPC_URL);
 
+  // ── Swap pool list cache (session-level) ────────────────────────────────────
+  // Pool lists are stable within a session; cache per network to avoid
+  // re-fetching every time the user switches back to the Swap tab.
+  const poolCacheRef = useRef<Partial<Record<SwapNetwork, PoolPair[]>>>({});
+
   // ── Receive state ───────────────────────────────────────────────────────────
   // (No state needed - only displays address and QR code)
 
@@ -255,24 +260,38 @@ function App(): JSX.Element {
     loadRpcUrls();
   }, []);
 
-  // Load swap token list whenever we enter the swap tab or the network changes
+  // Load swap token list whenever we enter the swap tab or the network changes.
+  // Pool lists are cached per network for the session lifetime to avoid
+  // redundant fetches when the user tabs back to Swap.
   useEffect(() => {
     if (!connected || !publicKey || activeTab !== 'swap') {
       return;
     }
     const loadTokens = async () => {
+      const cachedPools = poolCacheRef.current[swapNetwork];
       setIsLoadingSwapTokens(true);
       try {
-        // Fetch token/pool list and Solana default list in parallel (background)
-        // Balance is taken from portfolio — API balance is ignored
-        const [{tokens: swapToks, pools: swapPools}, solDefaults] =
-          await Promise.all([
+        if (cachedPools) {
+          // Pool list already loaded for this network — only re-fetch tokens
+          const [{tokens: swapToks}, solDefaults] = await Promise.all([
             getSwapTokens(publicKey, swapNetwork),
             fetchJupiterDefaultSolTokens(),
           ]);
-        setSwapTokenList(swapToks);
-        setSwapPoolList(swapPools);
-        setSolanaDefaultTokens(solDefaults);
+          setSwapTokenList(swapToks);
+          setSwapPoolList(cachedPools);
+          setSolanaDefaultTokens(solDefaults);
+        } else {
+          // First visit for this network — fetch everything
+          const [{tokens: swapToks, pools: swapPools}, solDefaults] =
+            await Promise.all([
+              getSwapTokens(publicKey, swapNetwork),
+              fetchJupiterDefaultSolTokens(),
+            ]);
+          poolCacheRef.current[swapNetwork] = swapPools;
+          setSwapTokenList(swapToks);
+          setSwapPoolList(swapPools);
+          setSolanaDefaultTokens(solDefaults);
+        }
       } catch (err) {
         console.error('[App] Failed to load swap tokens:', err);
       } finally {
@@ -506,11 +525,10 @@ function App(): JSX.Element {
       }
 
       setSwapQuoteRate(rate);
-      // If user has entered an amount, recalculate locally
+      // Recalculate output amount locally using the new rate
       if (swapFromAmount && parseFloat(swapFromAmount) > 0) {
         const decimals = Math.min(swapToToken.decimals, 6);
-        const output = rate * parseFloat(swapFromAmount);
-        setSwapToAmount(output.toFixed(decimals));
+        setSwapToAmount((rate * parseFloat(swapFromAmount)).toFixed(decimals));
       }
     } catch (err) {
       console.error('[App] Quote rate error:', err);
@@ -518,7 +536,8 @@ function App(): JSX.Element {
     } finally {
       setIsLoadingQuote(false);
     }
-  }, [swapFromToken, swapToToken, swapNetwork, swapFromAmount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [swapFromToken, swapToToken, swapNetwork]);
 
   // Calculate output amount locally based on existing quote rate
   const calculateOutputAmount = useCallback(
@@ -554,12 +573,81 @@ function App(): JSX.Element {
     }, 60000);
 
     return () => clearInterval(intervalId);
-  }, [swapFromToken, swapToToken, swapNetwork, fetchQuoteRate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [swapFromToken, swapToToken, swapNetwork]);
 
   const handleFromAmountChange = (text: string) => {
     setSwapFromAmount(text);
     calculateOutputAmount(text);
   };
+
+  // ── Memoised token selector lists ────────────────────────────────────────────
+  // Cached portfolio tokens eligible as swap "From" tokens
+  const fromTokensFromPortfolio = useMemo<SwapToken[]>(
+    () =>
+      tokens
+        .filter(p => !p.symbol.includes('LP') && p.rawBalance > 0)
+        .map(p => ({
+          mint: p.mint ?? toApiMint(null),
+          apiMint: toApiMint(p.mint),
+          prepareApiMint: toPrepareTokenInMint(p.mint),
+          symbol: p.symbol,
+          name: p.name,
+          logo: p.icon_uri,
+          balance: p.rawBalance,
+          decimals: p.decimals,
+          network: p.network,
+        })),
+    [tokens],
+  );
+
+  // Cached xDEX "To" token list: filter by active pool, sort by liquidity depth
+  const xdexToTokens = useMemo<SwapToken[]>(() => {
+    const fromApiMint = swapFromToken?.apiMint ?? '';
+    if (!swapFromToken) {
+      return [];
+    }
+    return swapTokenList
+      .filter(t => {
+        const candidateApiMint = t.apiMint;
+        return swapPoolList.some(
+          pool =>
+            pool.status === 0 &&
+            ((pool.token1Mint === fromApiMint &&
+              pool.token2Mint === candidateApiMint) ||
+              (pool.token2Mint === fromApiMint &&
+                pool.token1Mint === candidateApiMint)),
+        );
+      })
+      .sort((a, b) => {
+        const isXNTFrom = swapFromToken?.symbol === 'XNT';
+        const MEMO_MINT_LOCAL =
+          swapTokenList.find(t => t.symbol === 'MEMO')?.apiMint ?? '';
+        if (isXNTFrom) {
+          if (a.apiMint === MEMO_MINT_LOCAL) {
+            return -1;
+          }
+          if (b.apiMint === MEMO_MINT_LOCAL) {
+            return 1;
+          }
+        }
+        const getFromAmount = (candidateMint: string): number => {
+          const pool = swapPoolList.find(
+            p =>
+              p.status === 0 &&
+              ((p.token1Mint === fromApiMint &&
+                p.token2Mint === candidateMint) ||
+                (p.token2Mint === fromApiMint &&
+                  p.token1Mint === candidateMint)),
+          );
+          if (!pool) {
+            return 0;
+          }
+          return pool.token1Mint === fromApiMint ? pool.amount1 : pool.amount2;
+        };
+        return getFromAmount(b.apiMint) - getFromAmount(a.apiMint);
+      });
+  }, [swapFromToken, swapTokenList, swapPoolList]);
 
   const handleSwapDirection = () => {
     const prev = swapFromToken;
@@ -726,6 +814,8 @@ function App(): JSX.Element {
         // Refresh token list after swap
         const {tokens: refreshedTokens, pools: refreshedPools} =
           await getSwapTokens(publicKey, swapNetwork);
+        // Invalidate pool cache so next tab switch re-fetches fresh pools
+        poolCacheRef.current[swapNetwork] = refreshedPools;
         setSwapTokenList(refreshedTokens);
         setSwapPoolList(refreshedPools);
         // Sync portfolio
@@ -1339,69 +1429,6 @@ function App(): JSX.Element {
 
     // Determine if this is a Solana-To selector (Jupiter path)
     const isJupiterToSelector = !isFrom && swapNetwork === 'Solana Mainnet';
-
-    // From: portfolio tokens (local, balance > 0)
-    const fromTokensFromPortfolio: SwapToken[] = tokens
-      .filter(p => !p.symbol.includes('LP') && p.rawBalance > 0)
-      .map(p => ({
-        mint: p.mint ?? toApiMint(null),
-        apiMint: toApiMint(p.mint),
-        prepareApiMint: toPrepareTokenInMint(p.mint),
-        symbol: p.symbol,
-        name: p.name,
-        logo: p.icon_uri,
-        balance: p.rawBalance,
-        decimals: p.decimals,
-        network: p.network,
-      }));
-
-    // xDEX To list (X1 network): filter by active pool, then sort by From
-    // token's reserve amount in the pool (highest liquidity depth first)
-    const fromApiMint = swapFromToken?.apiMint ?? '';
-    const xdexToTokens = swapTokenList
-      .filter(t => {
-        if (!swapFromToken) {
-          return false;
-        }
-        const candidateApiMint = t.apiMint;
-        return swapPoolList.some(
-          pool =>
-            pool.status === 0 &&
-            ((pool.token1Mint === fromApiMint &&
-              pool.token2Mint === candidateApiMint) ||
-              (pool.token2Mint === fromApiMint &&
-                pool.token1Mint === candidateApiMint)),
-        );
-      })
-      .sort((a, b) => {
-        // When From is XNT, MEMO always goes first
-        const isXNTFrom = swapFromToken?.symbol === 'XNT';
-        if (isXNTFrom) {
-          if (a.apiMint === MEMO_MINT) {
-            return -1;
-          }
-          if (b.apiMint === MEMO_MINT) {
-            return 1;
-          }
-        }
-        // Find the pool for each To candidate and get the From token's amount
-        const getFromAmount = (candidateMint: string): number => {
-          const pool = swapPoolList.find(
-            p =>
-              p.status === 0 &&
-              ((p.token1Mint === fromApiMint &&
-                p.token2Mint === candidateMint) ||
-                (p.token2Mint === fromApiMint &&
-                  p.token1Mint === candidateMint)),
-          );
-          if (!pool) {
-            return 0;
-          }
-          // Return the amount of the From token in this pool
-          return pool.token1Mint === fromApiMint ? pool.amount1 : pool.amount2;
-        };
-        return getFromAmount(b.apiMint) - getFromAmount(a.apiMint);
-      });
 
     // Jupiter To list: search results if query present, else default list
     const jupiterToTokens = isJupiterToSelector
