@@ -1,13 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="com.solanamobile.seedvault.permission.ACCESS_SEED_VAULT" />
-    <uses-permission android:name="android.permission.CAMERA" />
 
     <!-- Remove permissions injected by react-native-vector-icons/fontawesome (targetSdkVersion < 4) -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" tools:node="remove" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
+    <!-- Remove WRITE_EXTERNAL_STORAGE injected by react-native-camera-kit (deprecated in targetSdk 34) -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
 
     <!-- Allow opening HTTP/HTTPS URLs in external browser (Android 11+) -->
     <queries>

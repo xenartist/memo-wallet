@@ -17,8 +17,6 @@ react {
     //   The list of variants to that are debuggable. For those we're going to
     //   skip the bundling of the JS bundle and the assets. By default is just 'debug'.
     //   If you add flavors like lite, prod, etc. you'll have to list your debuggableVariants.
-    debuggableVariants = []
-
     /* Bundling */
     //   A list containing the node command and its flags. Default is just 'node'.
     // nodeExecutableAndArgs = ["node"]
@@ -50,7 +48,7 @@ react {
 /**
  * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
  */
-def enableProguardInReleaseBuilds = false
+def enableProguardInReleaseBuilds = true
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -75,8 +73,8 @@ android {
         applicationId "rip.memo.wallet"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.0.0"
+        versionCode 4
+        versionName "1.0.2"
     }
     signingConfigs {
         debug {

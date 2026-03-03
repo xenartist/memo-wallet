@@ -1047,7 +1047,7 @@ function App(): JSX.Element {
       </TouchableOpacity>
 
       <Text style={styles.hint}>Powered by X1 & Solana</Text>
-      <Text style={styles.versionText}>v1.0.0</Text>
+      <Text style={styles.versionText}>v1.0.2</Text>
     </View>
   );
 
@@ -1320,7 +1320,7 @@ function App(): JSX.Element {
             Remove Authorization
           </Text>
         </TouchableOpacity>
-        <Text style={styles.settingsVersionText}>v1.0.0</Text>
+        <Text style={styles.settingsVersionText}>v1.0.2</Text>
       </ScrollView>
     </View>
   );
