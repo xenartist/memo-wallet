@@ -57,6 +57,17 @@ import {
 import QRScanner from './src/QRScanner';
 import QRCode from 'react-native-qrcode-svg';
 import {WebView} from 'react-native-webview';
+import {
+  TransactionRecord,
+  TransactionDetail,
+  fetchTransactionHistory,
+  fetchTransactionDetail,
+  groupTransactionsByDate,
+  getExplorerUrl,
+  formatTxTime,
+  formatFee,
+  formatSignature,
+} from './src/activity';
 
 // Default swap tokens shown immediately on first load (balance filled in after API loads)
 const MEMO_MINT = 'memoX1sJsBY6od7CfQ58XooRALwnocAZen4L7mW1ick';
@@ -197,6 +208,17 @@ function App(): JSX.Element {
   // ── WebView state ───────────────────────────────────────────────────────────
   const [showWebView, setShowWebView] = useState(false);
   const [webViewUrl, setWebViewUrl] = useState('');
+
+  // ── Activity state ──────────────────────────────────────────────────────────
+  const [activityTab, setActivityTab] = useState<'X1' | 'Solana' | 'All'>('X1');
+  const [activityX1Txs, setActivityX1Txs] = useState<TransactionRecord[]>([]);
+  const [activitySolTxs, setActivitySolTxs] = useState<TransactionRecord[]>([]);
+  const [isLoadingActivity, setIsLoadingActivity] = useState(false);
+  const [activityDetailVisible, setActivityDetailVisible] = useState(false);
+  const [activityDetail, setActivityDetail] = useState<TransactionDetail | null>(
+    null,
+  );
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
 
   // Look up balance for a swap token from the already-loaded portfolio data.
   // Matching is done via apiMint (normalises native variants) + network.
@@ -350,6 +372,29 @@ function App(): JSX.Element {
     const valid = isValidSolanaAddress(sendRecipient);
     setIsAddressValid(valid);
   }, [sendRecipient]);
+
+  // ── Activity: Load transaction history when entering activity tab ──────────
+  useEffect(() => {
+    if (!connected || !publicKey || activeTab !== 'activity') {
+      return;
+    }
+    const loadActivity = async () => {
+      setIsLoadingActivity(true);
+      try {
+        const [x1Txs, solTxs] = await Promise.all([
+          fetchTransactionHistory(publicKey, 'X1'),
+          fetchTransactionHistory(publicKey, 'Solana'),
+        ]);
+        setActivityX1Txs(x1Txs);
+        setActivitySolTxs(solTxs);
+      } catch (err) {
+        console.error('[App] Failed to load activity:', err);
+      } finally {
+        setIsLoadingActivity(false);
+      }
+    };
+    loadActivity();
+  }, [connected, publicKey, activeTab]);
 
   const checkAndRequestPermission = async (): Promise<boolean> => {
     if (Platform.OS !== 'android') {
@@ -1047,7 +1092,7 @@ function App(): JSX.Element {
       </TouchableOpacity>
 
       <Text style={styles.hint}>Powered by X1 & Solana</Text>
-      <Text style={styles.versionText}>v1.0.2</Text>
+      <Text style={styles.versionText}>v1.0.3</Text>
     </View>
   );
 
@@ -1206,6 +1251,23 @@ function App(): JSX.Element {
           Swap
         </Text>
       </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.navItem}
+        onPress={() => setActiveTab('activity')}>
+        <FontAwesome
+          name="history"
+          size={20}
+          color={activeTab === 'activity' ? '#38B6FF' : '#888'}
+          style={styles.navIconImg}
+        />
+        <Text
+          style={[
+            styles.navIcon,
+            activeTab === 'activity' && styles.navIconActive,
+          ]}>
+          Activity
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 
@@ -1320,7 +1382,7 @@ function App(): JSX.Element {
             Remove Authorization
           </Text>
         </TouchableOpacity>
-        <Text style={styles.settingsVersionText}>v1.0.2</Text>
+        <Text style={styles.settingsVersionText}>v1.0.3</Text>
       </ScrollView>
     </View>
   );
@@ -2779,6 +2841,297 @@ function App(): JSX.Element {
     );
   };
 
+  // ── Activity Detail Modal ──────────────────────────────────────────────────
+  const handleOpenTxDetail = async (tx: TransactionRecord) => {
+    setActivityDetailVisible(true);
+    setActivityDetail(null);
+    setIsLoadingDetail(true);
+    try {
+      const detail = await fetchTransactionDetail(tx.signature, tx.network);
+      setActivityDetail(
+        detail || {
+          signature: tx.signature,
+          blockTime: tx.blockTime,
+          fee: 0,
+          network: tx.network,
+          err: tx.err,
+        },
+      );
+    } catch {
+      setActivityDetail({
+        signature: tx.signature,
+        blockTime: tx.blockTime,
+        fee: 0,
+        network: tx.network,
+        err: tx.err,
+      });
+    } finally {
+      setIsLoadingDetail(false);
+    }
+  };
+
+  const renderActivityDetailModal = () => {
+    const detail = activityDetail;
+    const accentColor =
+      detail?.network === 'Solana' ? '#9945FF' : '#38B6FF';
+    const explorerUrl = detail
+      ? getExplorerUrl(detail.signature, detail.network)
+      : '';
+
+    const copyToClipboard = (text: string, label: string) => {
+      Clipboard.setString(text);
+      Alert.alert('Copied', `${label} copied to clipboard`);
+    };
+
+    const openExplorer = () => {
+      setWebViewUrl(explorerUrl);
+      setShowWebView(true);
+      setActivityDetailVisible(false);
+    };
+
+    return (
+      <Modal
+        visible={activityDetailVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setActivityDetailVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.swapSuccessModal}>
+            {isLoadingDetail || !detail ? (
+              <View style={styles.activityDetailLoading}>
+                <ActivityIndicator color="#38B6FF" size="large" />
+                <Text style={styles.activityDetailLoadingText}>
+                  Loading transaction...
+                </Text>
+              </View>
+            ) : (
+              <>
+                <Text style={styles.swapSuccessTitle}>Transaction Detail</Text>
+
+                {/* Network Fee */}
+                <View style={styles.swapSuccessRow}>
+                  <Text style={styles.swapSuccessLabel}>Network Fee</Text>
+                  <View style={styles.swapSuccessValueRow}>
+                    <Text style={styles.swapSuccessValue}>
+                      {formatFee(detail.fee, detail.network)}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Wallet Address */}
+                <View style={styles.swapSuccessRow}>
+                  <Text style={styles.swapSuccessLabel}>Wallet Address</Text>
+                  <View style={styles.swapSuccessValueRow}>
+                    <Text style={styles.swapSuccessValue} numberOfLines={1}>
+                      {publicKey.slice(0, 8)}...{publicKey.slice(-8)}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() =>
+                        copyToClipboard(publicKey, 'Wallet Address')
+                      }
+                      style={styles.swapSuccessCopyBtn}>
+                      <FontAwesome name="copy" size={16} color={accentColor} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Transaction Time */}
+                <View style={styles.swapSuccessRow}>
+                  <Text style={styles.swapSuccessLabel}>Transaction Time</Text>
+                  <View style={styles.swapSuccessValueRow}>
+                    <Text style={styles.swapSuccessValue}>
+                      {formatTxTime(detail.blockTime)}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Transaction ID */}
+                <View style={styles.swapSuccessRow}>
+                  <Text style={styles.swapSuccessLabel}>Transaction ID</Text>
+                  <View style={styles.swapSuccessValueRow}>
+                    <Text style={styles.swapSuccessValue}>
+                      {formatSignature(detail.signature)}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() =>
+                        copyToClipboard(detail.signature, 'Transaction ID')
+                      }
+                      style={styles.swapSuccessCopyBtn}>
+                      <FontAwesome name="copy" size={16} color={accentColor} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Explorer URL */}
+                <TouchableOpacity
+                  style={styles.swapSuccessRow}
+                  onPress={openExplorer}
+                  activeOpacity={0.7}>
+                  <Text style={styles.swapSuccessLabel}>Explorer</Text>
+                  <View style={styles.swapSuccessValueRow}>
+                    <Text style={styles.swapSuccessValue} numberOfLines={1}>
+                      {explorerUrl.slice(0, 30)}...
+                    </Text>
+                    <FontAwesome
+                      name="external-link"
+                      size={16}
+                      color={accentColor}
+                    />
+                  </View>
+                </TouchableOpacity>
+
+                {/* Close Button */}
+                <TouchableOpacity
+                  style={[
+                    styles.swapSuccessCloseBtn,
+                    {backgroundColor: accentColor},
+                  ]}
+                  onPress={() => setActivityDetailVisible(false)}>
+                  <Text style={styles.swapSuccessCloseBtnText}>Close</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  // ── Activity Screen ───────────────────────────────────────────────────────────
+  const renderActivityScreen = () => {
+    // Build transaction list based on selected tab
+    let displayTxs: TransactionRecord[];
+    if (activityTab === 'X1') {
+      displayTxs = activityX1Txs;
+    } else if (activityTab === 'Solana') {
+      displayTxs = activitySolTxs;
+    } else {
+      // All: merge and sort by blockTime descending
+      displayTxs = [...activityX1Txs, ...activitySolTxs].sort(
+        (a, b) => b.blockTime - a.blockTime,
+      );
+    }
+
+    const sections = groupTransactionsByDate(displayTxs);
+
+    return (
+      <View style={styles.screenContainer}>
+        {/* Detail Modal */}
+        {renderActivityDetailModal()}
+
+        {/* Header */}
+        <View style={styles.screenHeader}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => setActiveTab('portfolio')}>
+            <FontAwesome name="arrow-left" size={20} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.screenTitle}>Activity</Text>
+          <View style={styles.placeholder} />
+        </View>
+
+        {/* Network Tabs */}
+        <View style={styles.historyTabRow}>
+          {(['X1', 'Solana', 'All'] as const).map(tab => {
+            const isActive = activityTab === tab;
+            const activeColor =
+              tab === 'X1'
+                ? '#38B6FF'
+                : tab === 'Solana'
+                ? '#9945FF'
+                : '#F0B429';
+            return (
+              <TouchableOpacity
+                key={tab}
+                style={[
+                  styles.historyTab,
+                  isActive && {backgroundColor: activeColor},
+                ]}
+                onPress={() => setActivityTab(tab)}>
+                <Text
+                  style={[
+                    styles.historyTabText,
+                    isActive && styles.historyTabTextActive,
+                  ]}>
+                  {tab === 'X1'
+                    ? 'X1 Mainnet'
+                    : tab === 'Solana'
+                    ? 'Solana'
+                    : 'All'}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* Loading State */}
+        {isLoadingActivity ? (
+          <View style={styles.activityLoading}>
+            <ActivityIndicator color="#38B6FF" size="large" />
+            <Text style={styles.activityLoadingText}>
+              Loading transactions...
+            </Text>
+          </View>
+        ) : sections.length === 0 ? (
+          <View style={styles.emptyHistoryState}>
+            <FontAwesome name="clock-o" size={32} color="#444" />
+            <Text style={styles.emptyHistoryText}>No transactions found</Text>
+          </View>
+        ) : (
+          /* Transaction List grouped by date */
+          <View style={styles.activityListContainer}>
+            {sections.map(section => (
+              <View key={section.title} style={styles.activitySection}>
+                <Text style={styles.activitySectionTitle}>{section.title}</Text>
+                {section.data.map(tx => (
+                  <TouchableOpacity
+                    key={tx.signature}
+                    style={styles.activityItem}
+                    onPress={() => handleOpenTxDetail(tx)}>
+                    <View style={styles.activityItemIcon}>
+                      <FontAwesome
+                        name={tx.err ? 'times-circle' : 'exchange'}
+                        size={14}
+                        color={tx.err ? '#F44336' : '#38B6FF'}
+                      />
+                    </View>
+                    <View style={styles.activityItemInfo}>
+                      <Text style={styles.activityItemSig}>
+                        {formatSignature(tx.signature)}
+                      </Text>
+                      <Text style={styles.activityItemMeta}>
+                        {tx.err ? 'Failed' : 'Confirmed'}
+                      </Text>
+                    </View>
+                    {activityTab === 'All' && (
+                      <View
+                        style={[
+                          styles.historyNetworkBadge,
+                          tx.network === 'X1'
+                            ? styles.networkBadgeX1
+                            : styles.networkBadgeSolana,
+                        ]}>
+                        <Text style={styles.networkBadgeText}>
+                          {tx.network === 'X1' ? 'X1' : 'SOL'}
+                        </Text>
+                      </View>
+                    )}
+                    <FontAwesome
+                      name="chevron-right"
+                      size={12}
+                      color="#555"
+                      style={styles.activityItemChevron}
+                    />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case 'send':
@@ -2789,6 +3142,8 @@ function App(): JSX.Element {
         return renderReceiveScreen();
       case 'settings':
         return renderSettingsScreen();
+      case 'activity':
+        return renderActivityScreen();
       default:
         return renderWalletScreen();
     }
@@ -2802,7 +3157,8 @@ function App(): JSX.Element {
           renderLoginScreen()
         ) : activeTab === 'swap' ||
           activeTab === 'send' ||
-          activeTab === 'receive' ? (
+          activeTab === 'receive' ||
+          activeTab === 'activity' ? (
           <View style={styles.swapScrollView}>
             <ScrollView
               style={styles.swapScrollView}
@@ -3919,6 +4275,74 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 10,
     fontWeight: '600',
+  },
+  // ── Activity styles ──────────────────────────────────────────────────────────
+  activityLoading: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+  },
+  activityLoadingText: {
+    color: '#888',
+    fontSize: 14,
+    marginTop: 12,
+  },
+  activityListContainer: {
+    flex: 1,
+  },
+  activitySection: {
+    marginBottom: 16,
+  },
+  activitySectionTitle: {
+    color: '#888',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  activityItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  activityItemIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#0a0a0a',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  activityItemInfo: {
+    flex: 1,
+  },
+  activityItemSig: {
+    color: '#fff',
+    fontSize: 13,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    marginBottom: 3,
+  },
+  activityItemMeta: {
+    color: '#888',
+    fontSize: 11,
+  },
+  activityItemChevron: {
+    marginLeft: 8,
+  },
+  activityDetailLoading: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+  },
+  activityDetailLoadingText: {
+    color: '#888',
+    fontSize: 14,
+    marginTop: 12,
   },
   // ── WebView styles ──────────────────────────────────────────────────────────
   webViewContainer: {
